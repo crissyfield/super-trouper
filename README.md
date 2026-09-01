@@ -4,16 +4,32 @@
 
 ## Status
 
-The `serve` command is currently a no-op scaffold while MCP capabilities are implemented.
+The `serve` command connects to a remote Frida server. MCP tools are not implemented yet.
 
 ## Install
 
 ```sh
-go install github.com/crissyfield/super-trouper@latest
+export FRIDA_DEVKIT="$PWD/etc/frida-core-devkit"
+make install
+```
+
+## Build
+
+Building requires a Frida Core devkit matching the build host. Set `FRIDA_DEVKIT` to the directory containing
+`include/frida-core.h` and `lib/libfrida-core.a`:
+
+```sh
+export FRIDA_DEVKIT="$PWD/etc/frida-core-devkit"
+make build
 ```
 
 ## Usage
 
 ```sh
-super-trouper serve
+export FRIDA_DEVKIT="$PWD/etc/frida-core-devkit"
+export SUPER_TROUPER_FRIDA_ADDRESS="iphone.local:27042"
+make run
 ```
+
+`SUPER_TROUPER_FRIDA_ADDRESS` can also be configured as `frida.address` in `config.yaml` or passed as
+`--frida.address host:port`.
