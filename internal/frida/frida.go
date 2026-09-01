@@ -12,11 +12,38 @@ import "C"
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/cgo"
 	"sync"
 	"unsafe"
 )
+
+const evaluatorScript = `
+function receiveEvaluation() {
+  recv('evaluate', function (message) {
+    const { id, source } = message.payload;
+
+    try {
+      send({ id, result: (0, eval)(source) });
+    } catch (error) {
+      send({
+        id,
+        error: {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        }
+      });
+    }
+
+    receiveEvaluation();
+  });
+}
+
+receiveEvaluation();
+`
 
 // Config contains the remote Frida server configuration.
 type Config struct {
@@ -39,13 +66,44 @@ type Application struct {
 
 // Client is a connection to a remote Frida server.
 type Client struct {
-	mu       sync.Mutex
-	manager  *C.FridaDeviceManager
-	device   *C.FridaDevice
-	version  string
-	deviceID string
-	name     string
-	closed   bool
+	mu        sync.Mutex
+	manager   *C.FridaDeviceManager
+	device    *C.FridaDevice
+	session   *C.FridaSession
+	script    *C.FridaScript
+	evaluator *evaluator
+	handler   uintptr
+	version   string
+	deviceID  string
+	name      string
+	closed    bool
+}
+
+type evaluator struct {
+	messages chan string
+	handle   cgo.Handle
+	nextID   uint64
+}
+
+type evaluationRequest struct {
+	Type    string `json:"type"`
+	Payload struct {
+		ID     uint64 `json:"id"`
+		Source string `json:"source"`
+	} `json:"payload"`
+}
+
+type evaluationResponse struct {
+	Type    string `json:"type"`
+	Payload struct {
+		ID     uint64          `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Name    string `json:"name"`
+			Message string `json:"message"`
+			Stack   string `json:"stack"`
+		} `json:"error"`
+	} `json:"payload"`
 }
 
 var library struct {
@@ -188,7 +246,7 @@ func (c *Client) ListProcesses(ctx context.Context) ([]Process, error) {
 	count := int(C.frida_process_list_size(list))
 	processes := make([]Process, 0, count)
 
-	for index := 0; index < count; index++ {
+	for index := range count {
 		process := C.frida_process_list_get(list, C.gint(index))
 		if process == nil {
 			continue
@@ -204,6 +262,139 @@ func (c *Client) ListProcesses(ctx context.Context) ([]Process, error) {
 	return processes, nil
 }
 
+// AttachEvaluator attaches to pid and loads a persistent JavaScript evaluator.
+func (c *Client) AttachEvaluator(ctx context.Context, pid uint) error {
+	if pid == 0 {
+		return errors.New("Frida process PID is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return errors.New("Frida client is closed")
+	}
+
+	if c.session != nil {
+		return errors.New("Frida client already has an attached session")
+	}
+
+	cancellable, releaseCancellable := newCancellable(ctx)
+
+	var gErr *C.GError
+	session := C.frida_device_attach_sync(c.device, C.guint(pid), nil, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		releaseCancellable()
+		return fmt.Errorf("attach to process %d: %w", pid, err)
+	}
+
+	if session == nil {
+		releaseCancellable()
+		return fmt.Errorf("attach to process %d: no session returned", pid)
+	}
+
+	source := C.CString(evaluatorScript)
+	defer C.free(unsafe.Pointer(source))
+
+	gErr = nil
+	script := C.frida_session_create_script_sync(session, source, nil, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		detachSession(session, cancellable)
+		releaseCancellable()
+		return fmt.Errorf("create script for process %d: %w", pid, err)
+	}
+
+	if script == nil {
+		detachSession(session, cancellable)
+		releaseCancellable()
+		return fmt.Errorf("create script for process %d: no script returned", pid)
+	}
+
+	evaluator := &evaluator{messages: make(chan string, 1)}
+	evaluator.handle = cgo.NewHandle(evaluator)
+	handler := connectScriptMessage(unsafe.Pointer(script), uintptr(evaluator.handle))
+	if handler == 0 {
+		evaluator.handle.Delete()
+		unref(unsafe.Pointer(script))
+		detachSession(session, cancellable)
+		releaseCancellable()
+		return errors.New("connect Frida script message handler")
+	}
+
+	gErr = nil
+	C.frida_script_load_sync(script, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		disconnectScriptMessage(unsafe.Pointer(script), handler)
+		evaluator.handle.Delete()
+		unref(unsafe.Pointer(script))
+		detachSession(session, cancellable)
+		releaseCancellable()
+		return fmt.Errorf("load script for process %d: %w", pid, err)
+	}
+
+	releaseCancellable()
+	c.session = session
+	c.script = script
+	c.evaluator = evaluator
+	c.handler = handler
+
+	return nil
+}
+
+// Evaluate runs source in the persistent JavaScript evaluator and returns its JSON result.
+func (c *Client) Evaluate(ctx context.Context, source string) (json.RawMessage, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil, errors.New("Frida client is closed")
+	}
+
+	if c.evaluator == nil {
+		return nil, errors.New("Frida evaluator is not attached")
+	}
+
+	c.evaluator.nextID++
+	request := evaluationRequest{Type: "evaluate"}
+	request.Payload.ID = c.evaluator.nextID
+	request.Payload.Source = source
+
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("encode evaluation request: %w", err)
+	}
+
+	message := C.CString(string(encoded))
+	defer C.free(unsafe.Pointer(message))
+	C.frida_script_post(c.script, message, nil)
+
+	for {
+		select {
+		case encodedResponse := <-c.evaluator.messages:
+			var response evaluationResponse
+			if err := json.Unmarshal([]byte(encodedResponse), &response); err != nil {
+				return nil, fmt.Errorf("decode evaluation response: %w", err)
+			}
+
+			if response.Type != "send" {
+				return nil, fmt.Errorf("evaluate JavaScript: unexpected message type %q", response.Type)
+			}
+
+			if response.Payload.ID != request.Payload.ID {
+				continue
+			}
+
+			if response.Payload.Error != nil {
+				return nil, fmt.Errorf("evaluate JavaScript: %s: %s", response.Payload.Error.Name, response.Payload.Error.Message)
+			}
+
+			return response.Payload.Result, nil
+		case <-ctx.Done():
+			return nil, fmt.Errorf("evaluate JavaScript: %w", ctx.Err())
+		}
+	}
+}
+
 // Close disconnects from the remote server and releases Frida Core resources.
 func (c *Client) Close(ctx context.Context) error {
 	c.mu.Lock()
@@ -216,6 +407,36 @@ func (c *Client) Close(ctx context.Context) error {
 	c.closed = true
 
 	cancellable, releaseCancellable := newCancellable(ctx)
+
+	var closeErr error
+
+	if c.script != nil {
+		var gErr *C.GError
+		C.frida_script_unload_sync(c.script, cancellable, &gErr)
+		if err := consumeGError(gErr); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("unload Frida script: %w", err))
+		}
+
+		if c.handler != 0 {
+			disconnectScriptMessage(unsafe.Pointer(c.script), c.handler)
+			c.handler = 0
+		}
+
+		if c.evaluator != nil {
+			c.evaluator.handle.Delete()
+			c.evaluator = nil
+		}
+
+		unref(unsafe.Pointer(c.script))
+		c.script = nil
+	}
+
+	if c.session != nil {
+		if err := detachSession(c.session, cancellable); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("detach Frida session: %w", err))
+		}
+		c.session = nil
+	}
 
 	var gErr *C.GError
 	C.frida_device_manager_close_sync(c.manager, cancellable, &gErr)
@@ -230,14 +451,16 @@ func (c *Client) Close(ctx context.Context) error {
 		c.manager = nil
 	}
 
-	closeErr := consumeGError(gErr)
+	if err := consumeGError(gErr); err != nil {
+		closeErr = errors.Join(closeErr, fmt.Errorf("close Frida device manager: %w", err))
+	}
 
 	// Frida deinitializes GLib and GIO, so free their objects first.
 	releaseCancellable()
 	releaseLibrary()
 
 	if closeErr != nil {
-		return fmt.Errorf("close Frida device manager: %w", closeErr)
+		return closeErr
 	}
 
 	return nil
@@ -284,6 +507,15 @@ func newCancellable(ctx context.Context) (*C.GCancellable, func()) {
 
 func unref(value unsafe.Pointer) {
 	C.frida_unref(C.gpointer(value))
+}
+
+func detachSession(session *C.FridaSession, cancellable *C.GCancellable) error {
+	var gErr *C.GError
+	C.frida_session_detach_sync(session, cancellable, &gErr)
+	err := consumeGError(gErr)
+	unref(unsafe.Pointer(session))
+
+	return err
 }
 
 func consumeGError(gErr *C.GError) error {

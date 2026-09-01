@@ -28,8 +28,10 @@ make build
 ```sh
 export FRIDA_DEVKIT="$PWD/etc/frida-core-devkit"
 export SUPER_TROUPER_FRIDA_ADDRESS="iphone.local:27042"
+export SUPER_TROUPER_FRIDA_PID="1234"
 make run
 ```
 
 `SUPER_TROUPER_FRIDA_ADDRESS` can also be configured as `frida.address` in `config.yaml` or passed as
-`--frida.address host:port`.
+`--frida.address host:port`. `SUPER_TROUPER_FRIDA_PID` identifies the process to attach; the server loads a
+persistent JavaScript evaluator, evaluates `1+1`, and logs its result.

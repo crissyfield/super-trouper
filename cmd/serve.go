@@ -21,6 +21,7 @@ var CmdServe = &cobra.Command{
 
 func init() {
 	CmdServe.Flags().String("frida.address", "", "Frida server address in host:port form")
+	CmdServe.Flags().Uint("frida.pid", 0, "PID of the process to attach")
 }
 
 // runServe executes the 'serve' command.
@@ -50,6 +51,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			slog.Bool("running", application.Running),
 		)
 	}
+
+	pid := viper.GetUint("frida.pid")
+	if err := client.AttachEvaluator(cmd.Context(), pid); err != nil {
+		return fmt.Errorf("attach Frida evaluator: %w", err)
+	}
+
+	result, err := client.Evaluate(cmd.Context(), "Process.enumerateModules()")
+	if err != nil {
+		return fmt.Errorf("evaluate JavaScript: %w", err)
+	}
+
+	slog.Info("Evaluated JavaScript", slog.Uint64("pid", uint64(pid)), slog.String("result", string(result)))
 
 	<-cmd.Context().Done()
 	return nil
