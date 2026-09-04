@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -21,58 +22,129 @@ var CmdServe = &cobra.Command{
 
 func init() {
 	CmdServe.Flags().String("frida.address", "", "Frida server address in host:port form")
+	CmdServe.Flags().Bool("frida.usb", false, "Connect to the first detected USB device")
 	CmdServe.Flags().Uint("frida.pid", 0, "PID of the process to attach")
 }
 
 // runServe executes the 'serve' command.
 func runServe(cmd *cobra.Command, _ []string) error {
-	client, err := frida.New(cmd.Context(), frida.Config{Address: viper.GetString("frida.address")})
+	// Connect to the configured Frida device.
+	address := viper.GetString("frida.address")
+	useUSB := viper.GetBool("frida.usb")
+	if useUSB && (address != "") {
+		return errors.New("frida address and USB options cannot be used together")
+	}
+
+	manager, err := frida.NewManager()
+	if err != nil {
+		return fmt.Errorf("create Frida manager: %w", err)
+	}
+
+	defer closeFridaManager(manager)
+
+	var device *frida.Device
+	if useUSB {
+		device, err = manager.GetDeviceByType(cmd.Context(), frida.DeviceTypeUSB)
+	} else {
+		device, err = manager.AddRemoteDevice(cmd.Context(), address)
+	}
+
 	if err != nil {
 		return fmt.Errorf("connect to Frida server: %w", err)
 	}
-	defer closeFridaClient(client)
+
+	defer closeFridaDevice(device)
 
 	slog.Info("Connected to Frida server",
-		slog.String("device_id", client.DeviceID()),
-		slog.String("device_name", client.DeviceName()),
-		slog.String("frida_core_version", client.Version()),
+		slog.String("device_id", device.ID()),
+		slog.String("device_name", device.Name()),
+		slog.String("frida_core_version", frida.Version()),
 	)
 
-	applications, err := client.ListApplications(cmd.Context())
+	// List Frida apps
+	apps, err := device.ListApplications(cmd.Context())
 	if err != nil {
 		return fmt.Errorf("list Frida applications: %w", err)
 	}
 
-	for _, application := range applications {
+	for _, app := range apps {
 		slog.Info("Found Frida application",
-			slog.String("identifier", application.Identifier),
-			slog.String("name", application.Name),
-			slog.Uint64("pid", uint64(application.PID)),
-			slog.Bool("running", application.Running),
+			slog.String("identifier", app.Identifier),
+			slog.String("name", app.Name),
+			slog.Uint64("pid", uint64(app.PID)),
+			slog.Bool("running", app.Running),
 		)
 	}
 
-	pid := viper.GetUint("frida.pid")
-	if err := client.AttachEvaluator(cmd.Context(), pid); err != nil {
-		return fmt.Errorf("attach Frida evaluator: %w", err)
+	// Attach Frida session
+	session, err := device.Attach(cmd.Context(), viper.GetUint("frida.pid"))
+	if err != nil {
+		return fmt.Errorf("attach Frida session: %w", err)
 	}
 
-	result, err := client.Evaluate(cmd.Context(), "Process.enumerateModules()")
+	defer closeFridaSession(session)
+
+	// Create Frida evaluator
+	evaluator, err := frida.NewEvaluator(cmd.Context(), session)
+	if err != nil {
+		return fmt.Errorf("create Frida evaluator: %w", err)
+	}
+
+	defer closeFridaEvaluator(evaluator)
+
+	// Evaluate JavaScript
+	result, err := evaluator.Evaluate(cmd.Context(), "Process.enumerateModules()")
 	if err != nil {
 		return fmt.Errorf("evaluate JavaScript: %w", err)
 	}
 
-	slog.Info("Evaluated JavaScript", slog.Uint64("pid", uint64(pid)), slog.String("result", string(result)))
+	slog.Info("Evaluated JavaScript", slog.String("result", string(result)))
 
-	<-cmd.Context().Done()
 	return nil
 }
 
-func closeFridaClient(client *frida.Client) {
+// closeFridaManager closes the Frida manager with a timeout context.
+func closeFridaManager(manager *frida.Manager) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := client.Close(ctx); err != nil {
-		slog.Error("Close Frida client", slog.Any("error", err))
+	if err := manager.Close(ctx); err != nil {
+		slog.Error("Close Frida manager", slog.Any("error", err))
+	}
+}
+
+// closeFridaDevice closes the Frida device with a timeout context.
+func closeFridaDevice(device *frida.Device) {
+	// Create timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Close Frida device
+	if err := device.Close(ctx); err != nil {
+		slog.Error("Close Frida device", slog.Any("error", err))
+	}
+}
+
+// closeFridaSession closes the Frida session with a timeout context.
+func closeFridaSession(session *frida.Session) {
+	// Create timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Close Frida session
+	if err := session.Close(ctx); err != nil {
+		slog.Error("Close Frida session", slog.Any("error", err))
+	}
+}
+
+// closeFridaEvaluator closes the Frida evaluator with a timeout context.
+func closeFridaEvaluator(evaluator *frida.Evaluator) {
+	// Create timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Close Frida evaluator
+	if err := evaluator.Close(ctx); err != nil {
+		slog.Error("Close Frida evaluator", slog.Any("error", err))
 	}
 }
