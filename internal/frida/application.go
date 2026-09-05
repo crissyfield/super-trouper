@@ -128,9 +128,9 @@ func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption
 	return apps, nil
 }
 
-// GetApplicationByIdentifier returns the application with the given bundle identifier, or nil if no such application is
+// FindApplicationByIdentifier returns the application with the given bundle identifier, or nil if no such application is
 // installed on the remote device.
-func (d *Device) GetApplicationByIdentifier(ctx context.Context, identifier string) (*Application, error) {
+func (d *Device) FindApplicationByIdentifier(ctx context.Context, identifier string) (*Application, error) {
 	// Validate input
 	if identifier == "" {
 		return nil, errors.New("no identifier given")
@@ -150,9 +150,9 @@ func (d *Device) GetApplicationByIdentifier(ctx context.Context, identifier stri
 	return &apps[0], nil
 }
 
-// GetApplicationByName returns the first application with the given name, or nil if no such application is installed on
+// FindApplicationByName returns the first application with the given name, or nil if no such application is installed on
 // the remote device.
-func (d *Device) GetApplicationByName(ctx context.Context, name string) (*Application, error) {
+func (d *Device) FindApplicationByName(ctx context.Context, name string) (*Application, error) {
 	// Validate input
 	if name == "" {
 		return nil, errors.New("no name given")
@@ -170,4 +170,45 @@ func (d *Device) GetApplicationByName(ctx context.Context, name string) (*Applic
 	}
 
 	return &apps[0], nil
+}
+
+// FrontmostApplication returns the frontmost application on the remote device, or nil if there is none.
+func (d *Device) FrontmostApplication(ctx context.Context) (*Application, error) {
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return nil, errDeviceClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Query frontmost application
+	var gErr *C.GError
+
+	handle := C.frida_device_get_frontmost_application_sync(d.handle, nil, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return nil, fmt.Errorf("get frontmost application: %w", err)
+	}
+
+	if handle == nil {
+		// No frontmost application
+		return nil, nil
+	}
+
+	defer C.frida_unref(C.gpointer(unsafe.Pointer(handle)))
+
+	// Copy application into a Go instance
+	pid := uint(C.frida_application_get_pid(handle))
+
+	return &Application{
+		Identifier: C.GoString(C.frida_application_get_identifier(handle)),
+		Name:       C.GoString(C.frida_application_get_name(handle)),
+		PID:        pid,
+		Running:    pid != 0,
+	}, nil
 }
