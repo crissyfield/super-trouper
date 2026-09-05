@@ -98,6 +98,68 @@ func (d *Device) Type() DeviceType {
 	return d.dtype
 }
 
+// Params returns the system parameters reported by the device, such as the operating system, platform, and access
+// level.
+func (d *Device) Params(ctx context.Context) (map[string]any, error) {
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return nil, errDeviceClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Query system parameters
+	var gErr *C.GError
+
+	table := C.frida_device_query_system_parameters_sync(d.handle, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return nil, fmt.Errorf("query system parameters: %w", err)
+	}
+
+	if table == nil {
+		// No parameters reported
+		return nil, nil
+	}
+
+	defer C.g_hash_table_unref(table)
+
+	// Copy parameters into a Go map
+	params := make(map[string]any, int(C.g_hash_table_size(table)))
+
+	var iter C.GHashTableIter
+	var key, value C.gpointer
+
+	C.g_hash_table_iter_init(&iter, table)
+	for C.g_hash_table_iter_next(&iter, &key, &value) != 0 {
+		key := C.GoString((*C.char)(unsafe.Pointer(key)))
+		val := valueFromVariant((*C.GVariant)(unsafe.Pointer(value)))
+		params[key] = val
+	}
+
+	return params, nil
+}
+
+// IsLost reports whether the connection to the device was lost. A closed device is always reported as lost.
+func (d *Device) IsLost() bool {
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return true
+	}
+
+	// Check device state
+	return C.frida_device_is_lost(d.handle) != 0
+}
+
 // Attach attaches to the process with the given PID and returns the new session.
 func (d *Device) Attach(ctx context.Context, pid uint) (*Session, error) {
 	// Validate input
