@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"unsafe"
 )
 
@@ -20,25 +21,68 @@ type Application struct {
 	Running    bool   // Whether the application is running.
 }
 
-// ListApplications returns the applications installed on the remote device.
-func (d *Device) ListApplications(ctx context.Context) ([]Application, error) {
+// ApplicationOption configures a single aspect of a Device.ListApplications call.
+type ApplicationOption func(*applicationOptions)
+
+// applicationOptions holds the options for a Device.ListApplications call.
+type applicationOptions struct {
+	identifiers []string // Bundle identifiers requested from the device.
+	names       []string // Names that applications must match.
+}
+
+// WithIdentifiers restricts the enumeration to the application with the given bundle identifier(s).
+func WithIdentifiers(ids ...string) ApplicationOption {
+	return func(options *applicationOptions) { options.identifiers = append(options.identifiers, ids...) }
+}
+
+// WithNames restricts the enumeration to applications whose name(s) match exactly.
+func WithNames(names ...string) ApplicationOption {
+	return func(options *applicationOptions) { options.names = append(options.names, names...) }
+}
+
+// ListApplications returns the applications installed on the remote device. The result is filtered according to the
+// given options.
+func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption) ([]Application, error) {
+	// Assemble options
+	var config applicationOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
 	// Synchronize access
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	// Early exit if device is already closed
 	if d.closed {
-		return nil, errors.New("already closed")
+		return nil, errDeviceClosed
 	}
 
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
 	defer releaseCancellable()
 
+	// Create query options if identifiers were given
+	var options *C.FridaApplicationQueryOptions
+
+	if len(config.identifiers) != 0 {
+		options = C.frida_application_query_options_new()
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Copy identifiers to C strings
+		for _, identifier := range config.identifiers {
+			identifierCopy := C.CString(identifier)
+			defer C.free(unsafe.Pointer(identifierCopy))
+
+			C.frida_application_query_options_select_identifier(options, identifierCopy)
+		}
+	}
+
 	// Enumerate applications
 	var gErr *C.GError
 
-	list := C.frida_device_enumerate_applications_sync(d.handle, nil, cancellable, &gErr)
+	list := C.frida_device_enumerate_applications_sync(d.handle, options, cancellable, &gErr)
 	if err := consumeGError(gErr); err != nil {
 		return nil, fmt.Errorf("enumerate applications: %w", err)
 	}
@@ -61,18 +105,69 @@ func (d *Device) ListApplications(ctx context.Context) ([]Application, error) {
 			continue
 		}
 
-		// Append app to list
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(app)))
+
+		// Skip application if it does not match the requested names
+		name := C.GoString(C.frida_application_get_name(app))
+
+		if (len(config.names) != 0) && !slices.Contains(config.names, name) {
+			continue
+		}
+
+		// Append application to list
 		pid := uint(C.frida_application_get_pid(app))
 
 		apps = append(apps, Application{
 			Identifier: C.GoString(C.frida_application_get_identifier(app)),
-			Name:       C.GoString(C.frida_application_get_name(app)),
+			Name:       name,
 			PID:        pid,
 			Running:    pid != 0,
 		})
-
-		C.frida_unref(C.gpointer(unsafe.Pointer(app)))
 	}
 
 	return apps, nil
+}
+
+// GetApplicationByIdentifier returns the application with the given bundle identifier, or nil if no such application is
+// installed on the remote device.
+func (d *Device) GetApplicationByIdentifier(ctx context.Context, identifier string) (*Application, error) {
+	// Validate input
+	if identifier == "" {
+		return nil, errors.New("no identifier given")
+	}
+
+	// Look up application by identifier
+	apps, err := d.ListApplications(ctx, WithIdentifiers(identifier))
+	if err != nil {
+		return nil, err
+	}
+
+	// Early exit if no application matched
+	if len(apps) == 0 {
+		return nil, nil
+	}
+
+	return &apps[0], nil
+}
+
+// GetApplicationByName returns the first application with the given name, or nil if no such application is installed on
+// the remote device.
+func (d *Device) GetApplicationByName(ctx context.Context, name string) (*Application, error) {
+	// Validate input
+	if name == "" {
+		return nil, errors.New("no name given")
+	}
+
+	// Look up application by name
+	apps, err := d.ListApplications(ctx, WithNames(name))
+	if err != nil {
+		return nil, err
+	}
+
+	// Early exit if no application matched
+	if len(apps) == 0 {
+		return nil, nil
+	}
+
+	return &apps[0], nil
 }

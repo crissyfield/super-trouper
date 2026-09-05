@@ -203,3 +203,188 @@ func (d *Device) Attach(ctx context.Context, pid uint) (*Session, error) {
 
 	return session, nil
 }
+
+// SpawnOption configures a single aspect of a Device.Spawn call.
+type SpawnOption func(*spawnOptions)
+
+// spawnOptions holds the options for a Device.Spawn call.
+type spawnOptions struct {
+	argv []string          // Full argument vector, including the program.
+	env  map[string]string // Environment variables added on top of the inherited environment.
+	cwd  string            // Working directory.
+}
+
+// WithArgv replaces the program argument with the given argument vector, where the first element is the program to
+// execute.
+func WithArgv(argv []string) SpawnOption {
+	return func(options *spawnOptions) { options.argv = argv }
+}
+
+// WithEnv adds the given environment variables on top of the inherited environment.
+func WithEnv(env map[string]string) SpawnOption {
+	return func(options *spawnOptions) { options.env = env }
+}
+
+// WithCwd sets the working directory for the spawned process.
+func WithCwd(cwd string) SpawnOption {
+	return func(options *spawnOptions) { options.cwd = cwd }
+}
+
+// Spawn spawns the program with the given name on the remote device in suspended state and returns the process ID. Use
+// Resume to start execution of the spawned process.
+func (d *Device) Spawn(ctx context.Context, name string, opts ...SpawnOption) (uint, error) {
+	// Validate input
+	if name == "" {
+		return 0, errors.New("no program given")
+	}
+
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return 0, errDeviceClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Assemble spawn options
+	var options *C.FridaSpawnOptions
+	var config spawnOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if (len(config.argv) > 0) || (len(config.env) > 0) || (config.cwd != "") {
+		// Create spawn options
+		options = C.frida_spawn_options_new()
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Set argument values
+		if len(config.argv) != 0 {
+			// Build a NULL-terminated list of arguments
+			argv := make([]*C.char, 0, len(config.argv)+1)
+
+			for _, arg := range config.argv {
+				carg := C.CString(arg)
+				defer C.free(unsafe.Pointer(carg))
+
+				argv = append(argv, carg)
+			}
+
+			argv = append(argv, nil)
+
+			// Set argument vector
+			C.frida_spawn_options_set_argv(options, (**C.char)(unsafe.Pointer(&argv[0])), C.gint(len(config.argv)))
+		}
+
+		// Set environment variables
+		if len(config.env) != 0 {
+			// Build a NULL-terminated list of environment variables
+			env := make([]*C.char, 0, len(config.env)+1)
+
+			for key, value := range config.env {
+				cenv := C.CString(key + "=" + value)
+				defer C.free(unsafe.Pointer(cenv))
+
+				env = append(env, cenv)
+			}
+
+			env = append(env, nil)
+
+			// Set environment variables
+			C.frida_spawn_options_set_env(options, (**C.char)(unsafe.Pointer(&env[0])), C.gint(len(config.env)))
+		}
+
+		// Set working directory
+		if config.cwd != "" {
+			ccwd := C.CString(config.cwd)
+			defer C.free(unsafe.Pointer(ccwd))
+
+			C.frida_spawn_options_set_cwd(options, ccwd)
+		}
+	}
+
+	// Spawn process in suspended state
+	var gErr *C.GError
+
+	nameCopy := C.CString(name)
+	defer C.free(unsafe.Pointer(nameCopy))
+
+	pid := C.frida_device_spawn_sync(d.handle, nameCopy, options, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return 0, fmt.Errorf("spawn process [name=%s]: %w", name, err)
+	}
+
+	if pid == 0 {
+		return 0, fmt.Errorf("spawn process [name=%s]: empty", name)
+	}
+
+	return uint(pid), nil
+}
+
+// Resume resumes execution of the suspended process with the given PID.
+func (d *Device) Resume(ctx context.Context, pid uint) error {
+	// Validate input
+	if pid == 0 {
+		return errors.New("no pid given")
+	}
+
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return errDeviceClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Resume process
+	var gErr *C.GError
+
+	C.frida_device_resume_sync(d.handle, C.guint(pid), cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return fmt.Errorf("resume process [pid=%d]: %w", pid, err)
+	}
+
+	return nil
+}
+
+// Kill kills the process with the given PID.
+func (d *Device) Kill(ctx context.Context, pid uint) error {
+	// Validate input
+	if pid == 0 {
+		return errors.New("no pid given")
+	}
+
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return errDeviceClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Kill process
+	var gErr *C.GError
+
+	C.frida_device_kill_sync(d.handle, C.guint(pid), cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return fmt.Errorf("kill process [pid=%d]: %w", pid, err)
+	}
+
+	return nil
+}

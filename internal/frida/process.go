@@ -70,3 +70,48 @@ func (d *Device) ListProcesses(ctx context.Context) ([]Process, error) {
 
 	return processes, nil
 }
+
+// GetProcessByName returns the process with the given name, or nil if no such process is running on the remote device.
+func (d *Device) GetProcessByName(ctx context.Context, name string) (*Process, error) {
+	// Validate input
+	if name == "" {
+		return nil, errors.New("invalid name")
+	}
+
+	// Synchronize access
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Early exit if device is already closed
+	if d.closed {
+		return nil, errDeviceClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Find process by name
+	var gErr *C.GError
+
+	cname := C.CString(name)
+	defer C.free(unsafe.Pointer(cname))
+
+	handle := C.frida_device_find_process_by_name_sync(d.handle, cname, nil, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return nil, fmt.Errorf("find process [name=%s]: %w", name, err)
+	}
+
+	if handle == nil {
+		// No process found
+		return nil, nil
+	}
+
+	defer C.frida_unref(C.gpointer(unsafe.Pointer(handle)))
+
+	// Copy process into a Go instance
+	return &Process{
+		PID:  uint(C.frida_process_get_pid(handle)),
+		Name: C.GoString(C.frida_process_get_name(handle)),
+	}, nil
+}
