@@ -1,11 +1,5 @@
 package frida
 
-/*
-#include <stdlib.h>
-#include <frida-core.h>
-*/
-import "C"
-
 import (
 	_ "embed"
 
@@ -14,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"unsafe"
 )
 
 // evaluatorScript is the JavaScript source of the persistent evaluator.
@@ -120,19 +113,18 @@ func (e *Evaluator) Evaluate(ctx context.Context, statement string) (json.RawMes
 	}
 
 	// Post request to script
-	message := C.CString(string(encoded))
-	defer C.free(unsafe.Pointer(message))
-
-	C.frida_script_post(e.script.handle, message, nil)
+	if err := e.script.Post(string(encoded), nil); err != nil {
+		return nil, fmt.Errorf("post request: %w", err)
+	}
 
 	// Wait for matching response
 	for {
 		select {
-		case encodedResponse := <-e.script.messages:
+		case message := <-e.script.messages:
 			// Decode response
 			var response evaluationResponse
 
-			if err := json.Unmarshal([]byte(encodedResponse), &response); err != nil {
+			if err := json.Unmarshal([]byte(message.JSON), &response); err != nil {
 				return nil, fmt.Errorf("decode response: %w", err)
 			}
 

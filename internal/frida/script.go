@@ -6,13 +6,20 @@ package frida
 #include <frida-core.h>
 
 // The Go routine that should be called for each message.
-extern void goFridaScriptMessage(const gchar * message, uintptr_t handle);
+extern void goFridaScriptMessage(const gchar * message, gconstpointer data, gsize data_size, uintptr_t handle);
 
 // Is called from C and forwards the message to the proper Script instance.
 static void on_script_message(FridaScript * script, const gchar * message, GBytes * data, gpointer user_data) {
   (void) script;
-  (void) data;
-  goFridaScriptMessage(message, (uintptr_t) user_data);
+
+  gconstpointer data_ptr = NULL;
+  gsize data_size = 0;
+
+  if (data != NULL) {
+    data_ptr = g_bytes_get_data(data, &data_size);
+  }
+
+  goFridaScriptMessage(message, data_ptr, data_size, (uintptr_t) user_data);
 }
 
 // Connects the script message signal to the on_script_message callback.
@@ -40,16 +47,25 @@ import (
 // Number of buffered script messages before new messages are dropped.
 const scriptMessagesBuffer = 32
 
+// errScriptClosed indicates that the script was closed.
+var errScriptClosed = errors.New("script already closed")
+
+// ScriptMessage is a message sent by a script, optionally carrying a binary payload.
+type ScriptMessage struct {
+	JSON string // Raw JSON message.
+	Data []byte // Binary payload, nil if the message carries no data.
+}
+
 // Script is a script loaded into a session attached to a process on a Frida device.
 type Script struct {
-	mu         sync.Mutex     // Guards script state.
-	closed     bool           // Whether resources were released.
-	session    *Session       // Owning session.
-	logger     *slog.Logger   // Logger for library events.
-	handle     *C.FridaScript // Native Frida script handle.
-	messages   chan string    // Incoming script messages.
-	usrdata    cgo.Handle     // Keeps the script reachable from C.
-	msghandler uintptr        // Native script message handler.
+	mu         sync.Mutex         // Guards script state.
+	closed     bool               // Whether resources were released.
+	session    *Session           // Owning session.
+	logger     *slog.Logger       // Logger for library events.
+	handle     *C.FridaScript     // Native Frida script handle.
+	messages   chan ScriptMessage // Incoming script messages.
+	usrdata    cgo.Handle         // Keeps the script reachable from C.
+	msghandler uintptr            // Native script message handler.
 }
 
 // newScript creates a script in a session, connects its message handler, and loads it.
@@ -59,7 +75,7 @@ func newScript(session *Session, handle *C.FridaScript, cancellable *C.GCancella
 		session:  session,
 		logger:   session.logger,
 		handle:   handle,
-		messages: make(chan string, scriptMessagesBuffer),
+		messages: make(chan ScriptMessage, scriptMessagesBuffer),
 	}
 
 	// Connect message handler
@@ -127,7 +143,34 @@ func (s *Script) Close(ctx context.Context) error {
 	return closeErr
 }
 
+// Post sends the given JSON message to the script, with an optional binary payload.
+func (s *Script) Post(json string, data []byte) error {
+	// Synchronize access
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Early exit if already closed
+	if s.closed {
+		return errScriptClosed
+	}
+
+	// Encode message
+	cJSON := C.CString(json)
+	defer C.free(unsafe.Pointer(cJSON))
+
+	// Wrap binary payload
+	var gData *C.GBytes
+	if len(data) != 0 {
+		gData = C.g_bytes_new(C.gconstpointer(unsafe.Pointer(&data[0])), C.gsize(len(data)))
+		defer C.g_bytes_unref(gData)
+	}
+
+	C.frida_script_post(s.handle, cJSON, gData)
+
+	return nil
+}
+
 // Messages returns the stream of messages sent by the script.
-func (s *Script) Messages() <-chan string {
+func (s *Script) Messages() <-chan ScriptMessage {
 	return s.messages
 }
