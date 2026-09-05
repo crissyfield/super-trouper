@@ -30,16 +30,16 @@ type Manager struct {
 	devices map[*Device]struct{}  // Active devices created by this manager.
 }
 
-// Option configures a Frida manager.
-type Option func(*Manager)
+// ManagerOption configures a Frida manager.
+type ManagerOption func(*Manager)
 
-// WithLogger sets the logger used for library events.
-func WithLogger(logger *slog.Logger) Option {
+// WithManagerLogger sets the logger used for library events.
+func WithManagerLogger(logger *slog.Logger) ManagerOption {
 	return func(m *Manager) { m.logger = logger }
 }
 
 // NewManager initializes a Frida device manager.
-func NewManager(options ...Option) (*Manager, error) {
+func NewManager(options ...ManagerOption) (*Manager, error) {
 	// Create manager instance with defaults
 	m := &Manager{
 		devices: make(map[*Device]struct{}),
@@ -277,8 +277,39 @@ func (m *Manager) GetDeviceByType(ctx context.Context, dtype DeviceType) (*Devic
 	return device, nil
 }
 
-// AddRemoteDevice add a remote device by its address.
-func (m *Manager) AddRemoteDevice(ctx context.Context, address string) (*Device, error) {
+// RemoteDeviceOption configures a single aspect of a Manager.AddRemoteDevice call.
+type RemoteDeviceOption func(*remoteDeviceOptions)
+
+// remoteDeviceOptions holds the options for a Manager.AddRemoteDevice call.
+type remoteDeviceOptions struct {
+	certificatePEM    string // PEM-encoded TLS certificate used to authenticate the remote device.
+	token             string // Token used to authenticate with the remote device.
+	origin            string // Origin header required by the remote device.
+	keepaliveInterval int    // Keepalive interval for the connection, in seconds.
+}
+
+// WithRemoteDeviceCertificate sets the TLS certificate, given as PEM data, used to authenticate the remote device.
+func WithRemoteDeviceCertificate(pem string) RemoteDeviceOption {
+	return func(options *remoteDeviceOptions) { options.certificatePEM = pem }
+}
+
+// WithRemoteDeviceToken sets the token used to authenticate with the remote device.
+func WithRemoteDeviceToken(token string) RemoteDeviceOption {
+	return func(options *remoteDeviceOptions) { options.token = token }
+}
+
+// WithRemoteDeviceOrigin sets the Origin header required by the remote device.
+func WithRemoteDeviceOrigin(origin string) RemoteDeviceOption {
+	return func(options *remoteDeviceOptions) { options.origin = origin }
+}
+
+// WithRemoteDeviceKeepaliveInterval sets the keepalive interval, in seconds, for the connection to the remote device.
+func WithRemoteDeviceKeepaliveInterval(seconds int) RemoteDeviceOption {
+	return func(options *remoteDeviceOptions) { options.keepaliveInterval = seconds }
+}
+
+// AddRemoteDevice adds a remote device by its address, configured through the given options.
+func (m *Manager) AddRemoteDevice(ctx context.Context, address string, opts ...RemoteDeviceOption) (*Device, error) {
 	// Validate input
 	if address == "" {
 		return nil, errors.New("server address required")
@@ -297,16 +328,70 @@ func (m *Manager) AddRemoteDevice(ctx context.Context, address string) (*Device,
 	cancellable, releaseCancellable := newCancellable(ctx)
 	defer releaseCancellable()
 
+	// Assemble remote device options
+	var options *C.FridaRemoteDeviceOptions
+	var config remoteDeviceOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if (config.certificatePEM != "") || (config.token != "") || (config.origin != "") || (config.keepaliveInterval != 0) {
+		// Create remote device options
+		options = C.frida_remote_device_options_new()
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Set TLS certificate
+		if config.certificatePEM != "" {
+			// Parse certificate from PEM data
+			var certErr *C.GError
+
+			cPEM := C.CString(config.certificatePEM)
+			defer C.free(unsafe.Pointer(cPEM))
+
+			certificate := C.g_tls_certificate_new_from_pem(cPEM, C.gssize(len(config.certificatePEM)), &certErr)
+			if err := consumeGError(certErr); err != nil {
+				return nil, fmt.Errorf("create TLS certificate: %w", err)
+			}
+
+			defer C.g_object_unref(C.gpointer(unsafe.Pointer(certificate)))
+
+			// Set TLS certificate
+			C.frida_remote_device_options_set_certificate(options, certificate)
+		}
+
+		// Set token
+		if config.token != "" {
+			cToken := C.CString(config.token)
+			defer C.free(unsafe.Pointer(cToken))
+
+			C.frida_remote_device_options_set_token(options, cToken)
+		}
+
+		// Set origin
+		if config.origin != "" {
+			cOrigin := C.CString(config.origin)
+			defer C.free(unsafe.Pointer(cOrigin))
+
+			C.frida_remote_device_options_set_origin(options, cOrigin)
+		}
+
+		// Set keepalive interval
+		if config.keepaliveInterval != 0 {
+			C.frida_remote_device_options_set_keepalive_interval(options, C.gint(config.keepaliveInterval))
+		}
+	}
+
 	// Connect to device by address
 	var gErr *C.GError
 
-	cAddress := C.CString(address)
-	defer C.free(unsafe.Pointer(cAddress))
+	caddr := C.CString(address)
+	defer C.free(unsafe.Pointer(caddr))
 
 	fridaDevice := C.frida_device_manager_add_remote_device_sync(
 		m.manager,
-		cAddress,
-		nil,
+		caddr,
+		options,
 		cancellable,
 		&gErr,
 	)
@@ -324,4 +409,44 @@ func (m *Manager) AddRemoteDevice(ctx context.Context, address string) (*Device,
 	m.devices[device] = struct{}{}
 
 	return device, nil
+}
+
+// RemoveRemoteDevice removes the remote device registered with the manager at the given address.
+func (m *Manager) RemoveRemoteDevice(ctx context.Context, address string) error {
+	// Validate input
+	if address == "" {
+		return errors.New("server address required")
+	}
+
+	// Synchronize access
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if manager is already closed
+	if m.closed {
+		return errManagerClosed
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Remove device by address
+	var gErr *C.GError
+
+	caddr := C.CString(address)
+	defer C.free(unsafe.Pointer(caddr))
+
+	C.frida_device_manager_remove_remote_device_sync(
+		m.manager,
+		caddr,
+		cancellable,
+		&gErr,
+	)
+
+	if err := consumeGError(gErr); err != nil {
+		return fmt.Errorf("remove remote device [address=%q]: %w", address, err)
+	}
+
+	return nil
 }

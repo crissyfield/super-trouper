@@ -214,19 +214,19 @@ type spawnOptions struct {
 	cwd  string            // Working directory.
 }
 
-// WithArgv replaces the program argument with the given argument vector, where the first element is the program to
-// execute.
-func WithArgv(argv []string) SpawnOption {
+// WithSpawnArgv replaces the program argument with the given argument vector, where the first element is the
+// program to execute.
+func WithSpawnArgv(argv []string) SpawnOption {
 	return func(options *spawnOptions) { options.argv = argv }
 }
 
-// WithEnv adds the given environment variables on top of the inherited environment.
-func WithEnv(env map[string]string) SpawnOption {
+// WithSpawnEnv adds the given environment variables on top of the inherited environment.
+func WithSpawnEnv(env map[string]string) SpawnOption {
 	return func(options *spawnOptions) { options.env = env }
 }
 
-// WithCwd sets the working directory for the spawned process.
-func WithCwd(cwd string) SpawnOption {
+// WithSpawnCwd sets the working directory for the spawned process.
+func WithSpawnCwd(cwd string) SpawnOption {
 	return func(options *spawnOptions) { options.cwd = cwd }
 }
 
@@ -278,7 +278,7 @@ func (d *Device) Spawn(ctx context.Context, name string, opts ...SpawnOption) (u
 
 			argv = append(argv, nil)
 
-			// Set argument vector
+			// Set argument values
 			C.frida_spawn_options_set_argv(options, (**C.char)(unsafe.Pointer(&argv[0])), C.gint(len(config.argv)))
 		}
 

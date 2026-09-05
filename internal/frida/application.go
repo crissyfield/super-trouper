@@ -30,13 +30,13 @@ type applicationOptions struct {
 	names       []string // Names that applications must match.
 }
 
-// WithIdentifiers restricts the enumeration to the application with the given bundle identifier(s).
-func WithIdentifiers(ids ...string) ApplicationOption {
+// WithApplicationIdentifiers restricts the enumeration to the application with the given bundle identifier(s).
+func WithApplicationIdentifiers(ids ...string) ApplicationOption {
 	return func(options *applicationOptions) { options.identifiers = append(options.identifiers, ids...) }
 }
 
-// WithNames restricts the enumeration to applications whose name(s) match exactly.
-func WithNames(names ...string) ApplicationOption {
+// WithApplicationNames restricts the enumeration to applications whose name(s) match exactly.
+func WithApplicationNames(names ...string) ApplicationOption {
 	return func(options *applicationOptions) { options.names = append(options.names, names...) }
 }
 
@@ -137,7 +137,7 @@ func (d *Device) FindApplicationByIdentifier(ctx context.Context, identifier str
 	}
 
 	// Look up application by identifier
-	apps, err := d.ListApplications(ctx, WithIdentifiers(identifier))
+	apps, err := d.ListApplications(ctx, WithApplicationIdentifiers(identifier))
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (d *Device) FindApplicationByName(ctx context.Context, name string) (*Appli
 	}
 
 	// Look up application by name
-	apps, err := d.ListApplications(ctx, WithNames(name))
+	apps, err := d.ListApplications(ctx, WithApplicationNames(name))
 	if err != nil {
 		return nil, err
 	}
