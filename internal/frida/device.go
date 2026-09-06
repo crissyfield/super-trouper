@@ -160,8 +160,23 @@ func (d *Device) IsLost() bool {
 	return C.frida_device_is_lost(d.handle) != 0
 }
 
+// SessionOption configures a single aspect of a Device.Attach call.
+type SessionOption func(*sessionOptions)
+
+// sessionOptions holds the options for attaching to a process.
+type sessionOptions struct {
+	persistTimeout uint // Seconds a session survives a dropped connection, zero for Frida's default.
+}
+
+// WithSessionPersistTimeout sets how long, in seconds, the session persists on the target process after the connection
+// drops, allowing the session to be resumed without losing instrumentation state. Zero disables persistence, which is
+// Frida's default.
+func WithSessionPersistTimeout(timeout uint) SessionOption {
+	return func(options *sessionOptions) { options.persistTimeout = timeout }
+}
+
 // Attach attaches to the process with the given PID and returns the new session.
-func (d *Device) Attach(ctx context.Context, pid uint) (*Session, error) {
+func (d *Device) Attach(ctx context.Context, pid uint, opts ...SessionOption) (*Session, error) {
 	// Validate input
 	if pid == 0 {
 		return nil, errors.New("no pid given")
@@ -181,6 +196,23 @@ func (d *Device) Attach(ctx context.Context, pid uint) (*Session, error) {
 		return nil, fmt.Errorf("already attached to process [pid=%d]", pid)
 	}
 
+	// Assemble session options
+	var options *C.FridaSessionOptions
+	var config sessionOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if config.persistTimeout != 0 {
+		// Create session options
+		options = C.frida_session_options_new()
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Set persist timeout
+		C.frida_session_options_set_persist_timeout(options, C.guint(config.persistTimeout))
+	}
+
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
 	defer releaseCancellable()
@@ -188,7 +220,7 @@ func (d *Device) Attach(ctx context.Context, pid uint) (*Session, error) {
 	// Attach to process
 	var gErr *C.GError
 
-	handle := C.frida_device_attach_sync(d.handle, C.guint(pid), nil, cancellable, &gErr)
+	handle := C.frida_device_attach_sync(d.handle, C.guint(pid), options, cancellable, &gErr)
 	if err := consumeGError(gErr); err != nil {
 		return nil, fmt.Errorf("attach to process [pid=%d]: %w", pid, err)
 	}
