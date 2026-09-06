@@ -96,8 +96,41 @@ func (s *Session) PID() uint {
 	return s.pid
 }
 
-// CreateScript creates a script in the session from the given source and loads it.
-func (s *Session) CreateScript(ctx context.Context, source string) (*Script, error) {
+// ScriptOption configures a single aspect of a Session.CreateScript call.
+type ScriptOption func(*scriptOptions)
+
+// scriptOptions holds the options for a Session.CreateScript call.
+type scriptOptions struct {
+	name              string            // Script name.
+	runtime           ScriptRuntime     // JavaScript runtime, empty for Frida's default runtime.
+	snapshot          []byte            // QuickJS snapshot to seed the script with.
+	snapshotTransport SnapshotTransport // How the snapshot is delivered.
+}
+
+// WithScriptName sets the script name.
+func WithScriptName(name string) ScriptOption {
+	return func(options *scriptOptions) { options.name = name }
+}
+
+// WithScriptRuntime sets the JavaScript runtime used by the script.
+func WithScriptRuntime(runtime ScriptRuntime) ScriptOption {
+	return func(options *scriptOptions) { options.runtime = runtime }
+}
+
+// WithScriptSnapshot seeds the script with the given QuickJS snapshot.
+func WithScriptSnapshot(snapshot []byte) ScriptOption {
+	return func(options *scriptOptions) { options.snapshot = snapshot }
+}
+
+// WithScriptSnapshotTransport sets how the script snapshot is delivered to the target process. Requires
+// WithScriptSnapshot.
+func WithScriptSnapshotTransport(transport SnapshotTransport) ScriptOption {
+	return func(options *scriptOptions) { options.snapshotTransport = transport }
+}
+
+// CreateScript creates a script in the session from the given source. The script is not loaded until Script.Load
+// is called.
+func (s *Session) CreateScript(ctx context.Context, source string, opts ...ScriptOption) (*Script, error) {
 	// Validate input
 	if source == "" {
 		return nil, errors.New("no script source given")
@@ -116,6 +149,56 @@ func (s *Session) CreateScript(ctx context.Context, source string) (*Script, err
 	cancellable, releaseCancellable := newCancellable(ctx)
 	defer releaseCancellable()
 
+	// Assemble script options
+	var options *C.FridaScriptOptions
+	var config scriptOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if (config.name != "") || (config.runtime != "") || (len(config.snapshot) > 0) || (config.snapshotTransport != "") {
+		// Create script options
+		options = C.frida_script_options_new()
+		defer C.g_object_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Set name
+		if config.name != "" {
+			cname := C.CString(config.name)
+			defer C.free(unsafe.Pointer(cname))
+
+			C.frida_script_options_set_name(options, cname)
+		}
+
+		// Set runtime
+		if config.runtime != "" {
+			cruntime, ok := scriptRuntimeToFrida(config.runtime)
+			if !ok {
+				return nil, fmt.Errorf("invalid script runtime [runtime=%q]", config.runtime)
+			}
+
+			C.frida_script_options_set_runtime(options, cruntime)
+		}
+
+		// Set snapshot
+		if len(config.snapshot) != 0 {
+			csnapshot := C.g_bytes_new(C.gconstpointer(unsafe.Pointer(&config.snapshot[0])), C.gsize(len(config.snapshot)))
+			defer C.g_bytes_unref(csnapshot)
+
+			C.frida_script_options_set_snapshot(options, csnapshot)
+		}
+
+		// Set snapshot transport
+		if config.snapshotTransport != "" {
+			ctransport, ok := snapshotTransportToFrida(config.snapshotTransport)
+			if !ok {
+				return nil, fmt.Errorf("invalid snapshot transport [transport=%q]", config.snapshotTransport)
+			}
+
+			C.frida_script_options_set_snapshot_transport(options, ctransport)
+		}
+	}
+
 	// Create script
 	var gErr *C.GError
 
@@ -125,7 +208,7 @@ func (s *Session) CreateScript(ctx context.Context, source string) (*Script, err
 	handle := C.frida_session_create_script_sync(
 		s.handle,
 		cSource,
-		nil,
+		options,
 		cancellable,
 		&gErr,
 	)
@@ -139,13 +222,31 @@ func (s *Session) CreateScript(ctx context.Context, source string) (*Script, err
 	}
 
 	// Create script instance
-	script, err := newScript(s, handle, cancellable)
+	script, err := newScript(s, handle)
 	if err != nil {
 		C.frida_unref(C.gpointer(unsafe.Pointer(handle)))
 		return nil, fmt.Errorf("create script: %w", err)
 	}
 
 	s.scripts[script] = struct{}{}
+
+	return script, nil
+}
+
+// CreateAndLoadScript creates a script in the session from the given source and loads it.
+func (s *Session) CreateAndLoadScript(ctx context.Context, source string, opts ...ScriptOption) (*Script, error) {
+	// Create script
+	script, err := s.CreateScript(ctx, source, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("create script: %w", err)
+	}
+
+	// Load script
+	if err := script.Load(ctx); err != nil {
+		// Release the unusable script, preferring the load error
+		_ = script.Close(ctx)
+		return nil, fmt.Errorf("load script: %w", err)
+	}
 
 	return script, nil
 }

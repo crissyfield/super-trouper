@@ -57,7 +57,7 @@ type Evaluator struct {
 // NewEvaluator creates a persistent JavaScript evaluator in the given session.
 func NewEvaluator(ctx context.Context, session *Session) (*Evaluator, error) {
 	// Create evaluator script
-	script, err := session.CreateScript(ctx, evaluatorScript)
+	script, err := session.CreateAndLoadScript(ctx, evaluatorScript)
 	if err != nil {
 		return nil, fmt.Errorf("create evaluator script: %w", err)
 	}

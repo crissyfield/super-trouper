@@ -60,6 +60,7 @@ type ScriptMessage struct {
 type Script struct {
 	mu         sync.Mutex         // Guards script state.
 	closed     bool               // Whether resources were released.
+	loaded     bool               // Whether the script is loaded into its target process.
 	session    *Session           // Owning session.
 	logger     *slog.Logger       // Logger for library events.
 	handle     *C.FridaScript     // Native Frida script handle.
@@ -68,8 +69,9 @@ type Script struct {
 	msghandler uintptr            // Native script message handler.
 }
 
-// newScript creates a script in a session, connects its message handler, and loads it.
-func newScript(session *Session, handle *C.FridaScript, cancellable *C.GCancellable) (*Script, error) {
+// newScript creates a script instance for a session and connects its message handler. The script is not loaded;
+// call Load to load it.
+func newScript(session *Session, handle *C.FridaScript) (*Script, error) {
 	// Create script instance
 	script := &Script{
 		session:  session,
@@ -87,20 +89,10 @@ func newScript(session *Session, handle *C.FridaScript, cancellable *C.GCancella
 		return nil, fmt.Errorf("failed to connect message handler [pid=%d]", session.pid)
 	}
 
-	// Load script
-	var gErr *C.GError
-
-	C.frida_script_load_sync(handle, cancellable, &gErr)
-	if err := consumeGError(gErr); err != nil {
-		C.disconnect_script_message(handle, C.gulong(script.msghandler))
-		script.usrdata.Delete()
-		return nil, fmt.Errorf("load script [pid=%d]: %w", session.pid, err)
-	}
-
 	return script, nil
 }
 
-// Close unloads the script and releases resources.
+// Close unloads the script if loaded and releases resources.
 func (s *Script) Close(ctx context.Context) error {
 	// Synchronize access
 	s.mu.Lock()
@@ -119,11 +111,16 @@ func (s *Script) Close(ctx context.Context) error {
 
 	// Unload script
 	var closeErr error
-	var gErr *C.GError
 
-	C.frida_script_unload_sync(s.handle, cancellable, &gErr)
-	if err := consumeGError(gErr); err != nil {
-		closeErr = errors.Join(closeErr, fmt.Errorf("unload script: %w", err))
+	if s.loaded {
+		var gErr *C.GError
+
+		C.frida_script_unload_sync(s.handle, cancellable, &gErr)
+		if err := consumeGError(gErr); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("unload script [pid=%d]: %w", s.session.pid, err))
+		}
+
+		s.loaded = false
 	}
 
 	// Disconnect message handler
@@ -141,6 +138,73 @@ func (s *Script) Close(ctx context.Context) error {
 	s.session = nil
 
 	return closeErr
+}
+
+// Load loads the script into its target process. Loading an already loaded script is a no-op.
+func (s *Script) Load(ctx context.Context) error {
+	// Synchronize access
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Early exit if already closed
+	if s.closed {
+		return errScriptClosed
+	}
+
+	// Early exit if already loaded
+	if s.loaded {
+		return nil
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Load script
+	var gErr *C.GError
+
+	C.frida_script_load_sync(s.handle, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return fmt.Errorf("load script [pid=%d]: %w", s.session.pid, err)
+	}
+
+	s.loaded = true
+
+	return nil
+}
+
+// Unload unloads the script from its target process. The script stays registered with its session, and its
+// message stream remains available for draining. Unloading an already unloaded script is a no-op.
+func (s *Script) Unload(ctx context.Context) error {
+	// Synchronize access
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Early exit if already closed
+	if s.closed {
+		return errScriptClosed
+	}
+
+	// Early exit if not loaded
+	if !s.loaded {
+		return nil
+	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
+
+	// Unload script
+	var gErr *C.GError
+
+	C.frida_script_unload_sync(s.handle, cancellable, &gErr)
+	if err := consumeGError(gErr); err != nil {
+		return fmt.Errorf("unload script [pid=%d]: %w", s.session.pid, err)
+	}
+
+	s.loaded = false
+
+	return nil
 }
 
 // Post sends the given JSON message to the script, with an optional binary payload.
