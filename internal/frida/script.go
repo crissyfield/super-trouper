@@ -41,11 +41,12 @@ import (
 	"log/slog"
 	"runtime/cgo"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
 // Number of buffered script messages before new messages are dropped.
-const scriptMessagesBuffer = 32
+const scriptMessagesBuffer = 256
 
 // errScriptClosed indicates that the script was closed.
 var errScriptClosed = errors.New("script already closed")
@@ -59,7 +60,7 @@ type ScriptMessage struct {
 // Script is a script loaded into a session attached to a process on a Frida device.
 type Script struct {
 	mu         sync.Mutex         // Guards script state.
-	closed     bool               // Whether resources were released.
+	closed     atomic.Bool        // Whether resources were released.
 	loaded     bool               // Whether the script is loaded into its target process.
 	session    *Session           // Owning session.
 	logger     *slog.Logger       // Logger for library events.
@@ -98,12 +99,10 @@ func (s *Script) Close(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Early exit if already closed
-	if s.closed {
+	// Early exit if already closed, close otherwise
+	if !s.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-
-	s.closed = true
 
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
@@ -147,7 +146,7 @@ func (s *Script) Load(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	// Early exit if already closed
-	if s.closed {
+	if s.closed.Load() {
 		return errScriptClosed
 	}
 
@@ -181,7 +180,7 @@ func (s *Script) Unload(ctx context.Context) error {
 	defer s.mu.Unlock()
 
 	// Early exit if already closed
-	if s.closed {
+	if s.closed.Load() {
 		return errScriptClosed
 	}
 
@@ -214,7 +213,7 @@ func (s *Script) Post(json string, data []byte) error {
 	defer s.mu.Unlock()
 
 	// Early exit if already closed
-	if s.closed {
+	if s.closed.Load() {
 		return errScriptClosed
 	}
 
@@ -224,6 +223,7 @@ func (s *Script) Post(json string, data []byte) error {
 
 	// Wrap binary payload
 	var gData *C.GBytes
+
 	if len(data) != 0 {
 		gData = C.g_bytes_new(C.gconstpointer(unsafe.Pointer(&data[0])), C.gsize(len(data)))
 		defer C.g_bytes_unref(gData)
@@ -237,4 +237,23 @@ func (s *Script) Post(json string, data []byte) error {
 // Messages returns the stream of messages sent by the script.
 func (s *Script) Messages() <-chan ScriptMessage {
 	return s.messages
+}
+
+// handleMessage delivers a script message to the message stream, or records a drop when the stream is full. It is
+// called from the Frida event loop thread and must not block.
+func (s *Script) handleMessage(json string, data []byte) {
+	// Early exit if already closed
+	if s.closed.Load() {
+		return
+	}
+
+	// Non-blocking send
+	select {
+	case s.messages <- ScriptMessage{JSON: json, Data: data}:
+		// Message delivered
+
+	default:
+		// Warn about dropped messages
+		s.logger.Warn("Dropped script messages")
+	}
 }

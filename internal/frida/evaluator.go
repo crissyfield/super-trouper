@@ -128,8 +128,9 @@ func (e *Evaluator) Evaluate(ctx context.Context, statement string) (json.RawMes
 				return nil, fmt.Errorf("decode response: %w", err)
 			}
 
+			// Skip messages that are not evaluation responses
 			if response.Type != "send" {
-				return nil, fmt.Errorf("unexpected response type [type=%q]", response.Type)
+				continue
 			}
 
 			// Skip responses for other requests

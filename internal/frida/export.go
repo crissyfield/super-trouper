@@ -18,7 +18,7 @@ import (
 func goFridaScriptMessage(message *C.char, data unsafe.Pointer, dataSize C.gsize, handle C.uintptr_t) {
 	// Find proper script instance
 	script, ok := cgo.Handle(handle).Value().(*Script)
-	if !ok || script.closed {
+	if !ok {
 		return
 	}
 
@@ -29,10 +29,6 @@ func goFridaScriptMessage(message *C.char, data unsafe.Pointer, dataSize C.gsize
 		payload = C.GoBytes(data, C.int(dataSize))
 	}
 
-	// Non-blocking send:
-	// If the message buffer channel is full, the message will be dropped!
-	select {
-	case script.messages <- ScriptMessage{JSON: C.GoString(message), Data: payload}:
-	default:
-	}
+	// Forward message to the script instance
+	script.handleMessage(C.GoString(message), payload)
 }
