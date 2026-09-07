@@ -13,14 +13,14 @@
 
 - `main.go` owns `CmdRoot`, Viper setup, slog setup, signal-aware execution, and final error logging/exiting. Register commands with `CmdRoot.AddCommand`.
 - Cobra commands in `cmd/` use the command context for work that can block. Do not call `os.Exit` outside `main`.
-- `cmd/serve.go` defines the MCP server command. It connects to a Frida device (`--frida.address` or `--frida.usb`, mutually exclusive), lists applications, attaches to the process given by `--frida.pid`, creates the persistent JavaScript evaluator, and evaluates and logs JavaScript. MCP tools are not implemented yet.
+- `cmd/serve.go` defines the MCP server command. It connects to a Frida device (`--frida.address` or `--frida.usb`, mutually exclusive), lists applications, attaches to the process given by `--frida.pid` or `--frida.name` (mutually exclusive), creates the persistent JavaScript evaluator, and evaluates and logs JavaScript. MCP tools are not implemented yet.
 - `internal/frida/` is a CGO wrapper over frida-core exposing `Manager`, `Device`, `Session`, `Evaluator`, `Script`, `Process`, and `Application`. It embeds the evaluator script from `assets/evaluator.js`, provides GIO-cancellable helpers in `tools.go`, and performs refcounted library init in `library.go`.
 
 ## Configuration
 
 - Viper reads CLI flags, `SUPER_TROUPER_` environment variables, then config files named `config` (for example, `config.yaml`) in `/etc/super-trouper`, `~/.config/super-trouper`, and the working directory. Dots and hyphens become underscores, for example `SUPER_TROUPER_LOGGING_LEVEL`.
 - Logging flags are `logging.level` and `logging.json`.
-- The `serve` command adds `frida.address`, `frida.usb`, and `frida.pid` (environment variables `SUPER_TROUPER_FRIDA_ADDRESS`, `SUPER_TROUPER_FRIDA_USB`, and `SUPER_TROUPER_FRIDA_PID`). Address and USB options cannot be used together.
+- The `serve` command adds `frida.address`, `frida.usb`, `frida.pid`, `frida.name`, and `frida.wait` (environment variables `SUPER_TROUPER_FRIDA_ADDRESS`, `SUPER_TROUPER_FRIDA_USB`, `SUPER_TROUPER_FRIDA_PID`, `SUPER_TROUPER_FRIDA_NAME`, and `SUPER_TROUPER_FRIDA_WAIT`). Address and USB options cannot be used together; exactly one of PID or name must be given. `frida.wait` is a duration and only affects name-based attach.
 
 ## Conventions
 

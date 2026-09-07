@@ -24,11 +24,13 @@ func init() {
 	CmdServe.Flags().String("frida.address", "", "Frida server address in host:port form")
 	CmdServe.Flags().Bool("frida.usb", false, "Connect to the first detected USB device")
 	CmdServe.Flags().Uint("frida.pid", 0, "PID of the process to attach")
+	CmdServe.Flags().String("frida.name", "", "Name of the process to attach")
+	CmdServe.Flags().Duration("frida.wait", 0, "How long to wait for the process to appear before attaching")
 }
 
 // runServe executes the 'serve' command.
 func runServe(cmd *cobra.Command, _ []string) error {
-	// Connect to the configured Frida device.
+	// Connect to configured Frida device
 	address := viper.GetString("frida.address")
 	useUSB := viper.GetBool("frida.usb")
 	if useUSB && (address != "") {
@@ -76,11 +78,38 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		)
 	}
 
+	// Determine the target process
+	pid := viper.GetUint("frida.pid")
+	name := viper.GetString("frida.name")
+	if (pid != 0) && (name != "") {
+		return errors.New("frida pid and name options cannot be used together")
+	}
+
+	if (pid == 0) && (name == "") {
+		return errors.New("either frida pid or name option must be given")
+	}
+
+	// Resolve target process by name
+	if name != "" {
+		process, err := device.FindProcessByName(cmd.Context(), name, frida.WithProcessMatchTimeout(viper.GetDuration("frida.wait")))
+		if err != nil {
+			return fmt.Errorf("find Frida process: %w", err)
+		}
+
+		if process == nil {
+			return fmt.Errorf("process not found [name=%s]", name)
+		}
+
+		pid = process.PID
+	}
+
 	// Attach Frida session
-	session, err := device.Attach(cmd.Context(), viper.GetUint("frida.pid"))
+	session, err := device.Attach(cmd.Context(), pid)
 	if err != nil {
 		return fmt.Errorf("attach Frida session: %w", err)
 	}
+
+	slog.Info("Attached to Frida process", slog.Uint64("pid", uint64(session.PID())))
 
 	defer closeFridaSession(session)
 

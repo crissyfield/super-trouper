@@ -160,23 +160,23 @@ func (d *Device) IsLost() bool {
 	return C.frida_device_is_lost(d.handle) != 0
 }
 
-// SessionOption configures a single aspect of a Device.Attach call.
-type SessionOption func(*sessionOptions)
+// AttachOption configures a single aspect of a Device.Attach call.
+type AttachOption func(*attachOptions)
 
-// sessionOptions holds the options for attaching to a process.
-type sessionOptions struct {
+// attachOptions holds the options for attaching to a process.
+type attachOptions struct {
 	persistTimeout uint // Seconds a session survives a dropped connection, zero for Frida's default.
 }
 
 // WithSessionPersistTimeout sets how long, in seconds, the session persists on the target process after the connection
 // drops, allowing the session to be resumed without losing instrumentation state. Zero disables persistence, which is
 // Frida's default.
-func WithSessionPersistTimeout(timeout uint) SessionOption {
-	return func(options *sessionOptions) { options.persistTimeout = timeout }
+func WithSessionPersistTimeout(timeout uint) AttachOption {
+	return func(options *attachOptions) { options.persistTimeout = timeout }
 }
 
 // Attach attaches to the process with the given PID and returns the new session.
-func (d *Device) Attach(ctx context.Context, pid uint, opts ...SessionOption) (*Session, error) {
+func (d *Device) Attach(ctx context.Context, pid uint, opts ...AttachOption) (*Session, error) {
 	// Validate input
 	if pid == 0 {
 		return nil, errors.New("no pid given")
@@ -196,9 +196,9 @@ func (d *Device) Attach(ctx context.Context, pid uint, opts ...SessionOption) (*
 		return nil, fmt.Errorf("already attached to process [pid=%d]", pid)
 	}
 
-	// Assemble session options
+	// Assemble attach options
 	var options *C.FridaSessionOptions
-	var config sessionOptions
+	var config attachOptions
 
 	for _, opt := range opts {
 		opt(&config)

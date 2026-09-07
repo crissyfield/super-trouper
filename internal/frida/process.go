@@ -18,6 +18,20 @@ type Process struct {
 	Name string // Process name.
 }
 
+// ProcessMatchOption configures a single aspect of a process match query.
+type ProcessMatchOption func(*processMatchOptions)
+
+// processMatchOptions holds the options for matching a process.
+type processMatchOptions struct {
+	timeout uint // Milliseconds to wait for a match, zero to not wait.
+}
+
+// WithProcessMatchTimeout sets how long to wait for a process to match before giving up (in seconds). Zero, the
+// default, does not wait.
+func WithProcessMatchTimeout(timeout uint) ProcessMatchOption {
+	return func(options *processMatchOptions) { options.timeout = timeout }
+}
+
 // ListProcesses returns the processes running on the remote device.
 func (d *Device) ListProcesses(ctx context.Context) ([]Process, error) {
 	// Synchronize access
@@ -72,8 +86,8 @@ func (d *Device) ListProcesses(ctx context.Context) ([]Process, error) {
 }
 
 // FindProcessByName returns the process with the given name, or nil if no such process is running on the remote
-// device.
-func (d *Device) FindProcessByName(ctx context.Context, name string) (*Process, error) {
+// device. Name matching is case-insensitive, and the first matching process wins.
+func (d *Device) FindProcessByName(ctx context.Context, name string, opts ...ProcessMatchOption) (*Process, error) {
 	// Validate input
 	if name == "" {
 		return nil, errors.New("invalid name")
@@ -88,6 +102,23 @@ func (d *Device) FindProcessByName(ctx context.Context, name string) (*Process, 
 		return nil, errDeviceClosed
 	}
 
+	// Assemble match options
+	var options *C.FridaProcessMatchOptions
+	var config processMatchOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if config.timeout != 0 {
+		// Create match options
+		options = C.frida_process_match_options_new()
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Set timeout
+		C.frida_process_match_options_set_timeout(options, C.gint(config.timeout))
+	}
+
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
 	defer releaseCancellable()
@@ -98,7 +129,7 @@ func (d *Device) FindProcessByName(ctx context.Context, name string) (*Process, 
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 
-	handle := C.frida_device_find_process_by_name_sync(d.handle, cname, nil, cancellable, &gErr)
+	handle := C.frida_device_find_process_by_name_sync(d.handle, cname, options, cancellable, &gErr)
 	if err := consumeGError(gErr); err != nil {
 		return nil, fmt.Errorf("find process [name=%s]: %w", name, err)
 	}
