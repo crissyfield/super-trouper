@@ -13,23 +13,23 @@ import (
 	"github.com/crissyfield/super-trouper/internal/frida"
 )
 
-// CmdServe defines the 'serve' command.
-var CmdServe = &cobra.Command{
-	Use:   "serve",
-	Short: "Start the MCP server.",
-	RunE:  runServe,
+// CmdAttach defines the 'attach' command.
+var CmdAttach = &cobra.Command{
+	Use:   "attach",
+	Short: "Attach to a process on a Frida device.",
+	RunE:  runAttach,
 }
 
 func init() {
-	CmdServe.Flags().String("frida.address", "", "Frida server address in host:port form")
-	CmdServe.Flags().Bool("frida.usb", false, "Connect to the first detected USB device")
-	CmdServe.Flags().Uint("frida.pid", 0, "PID of the process to attach")
-	CmdServe.Flags().String("frida.name", "", "Name of the process to attach")
-	CmdServe.Flags().Duration("frida.wait", 0, "How long to wait for the process to appear before attaching")
+	CmdAttach.Flags().String("frida.address", "", "Frida server address in host:port form")
+	CmdAttach.Flags().Bool("frida.usb", false, "Connect to the first detected USB device")
+	CmdAttach.Flags().Uint("frida.pid", 0, "PID of the process to attach")
+	CmdAttach.Flags().String("frida.name", "", "Name of the process to attach")
+	CmdAttach.Flags().Duration("frida.wait", 0, "How long to wait for the process to appear before attaching")
 }
 
-// runServe executes the 'serve' command.
-func runServe(cmd *cobra.Command, _ []string) error {
+// runAttach executes the 'attach' command.
+func runAttach(cmd *cobra.Command, _ []string) error {
 	// Connect to configured Frida device
 	address := viper.GetString("frida.address")
 	useUSB := viper.GetBool("frida.usb")
@@ -91,7 +91,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	// Resolve target process by name
 	if name != "" {
-		process, err := device.FindProcessByName(cmd.Context(), name, frida.WithProcessMatchTimeout(viper.GetDuration("frida.wait")))
+		process, err := device.FindProcessByName(cmd.Context(), name, frida.WithProcessMatchTimeout(uint(viper.GetDuration("frida.wait").Seconds())))
 		if err != nil {
 			return fmt.Errorf("find Frida process: %w", err)
 		}

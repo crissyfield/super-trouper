@@ -38,8 +38,9 @@ func init() {
 	CmdRoot.PersistentFlags().String("logging.level", "info", "verbosity of logging output")
 	CmdRoot.PersistentFlags().Bool("logging.json", false, "change logging format to JSON")
 
-	// Register sub-command
-	CmdRoot.AddCommand(cmd.CmdServe)
+	// Register sub-commands
+	CmdRoot.AddCommand(cmd.CmdAttach)
+	CmdRoot.AddCommand(cmd.CmdMcp)
 }
 
 // setup will set up configuration management and logging.

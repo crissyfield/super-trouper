@@ -15,4 +15,4 @@ install: check-devkit
 	CGO_ENABLED=1 CGO_CFLAGS="-I$(FRIDA_DEVKIT)/include" CGO_LDFLAGS="-L$(FRIDA_DEVKIT)/lib" go install .
 
 run: check-devkit
-	CGO_ENABLED=1 CGO_CFLAGS="-I$(FRIDA_DEVKIT)/include" CGO_LDFLAGS="-L$(FRIDA_DEVKIT)/lib" go run . serve
+	CGO_ENABLED=1 CGO_CFLAGS="-I$(FRIDA_DEVKIT)/include" CGO_LDFLAGS="-L$(FRIDA_DEVKIT)/lib" go run . attach

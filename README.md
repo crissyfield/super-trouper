@@ -4,8 +4,8 @@
 
 ## Status
 
-The `serve` command keeps a Frida device manager for its lifetime and connects by address or to a USB device. MCP
-tools are not implemented yet.
+The `attach` command keeps a Frida device manager for its lifetime and connects by address or to a USB device. The
+`mcp` command is a placeholder. MCP tools are not implemented yet.
 
 ## Install
 
