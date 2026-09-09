@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="etc/images/logo.png" width="320" alt="super-trouper logo">
+</p>
+
 # super-trouper
 
 `super-trouper` is an MCP server for the [Frida](https://frida.re/) reverse engineering toolkit.
