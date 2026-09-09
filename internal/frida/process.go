@@ -26,8 +26,8 @@ type processMatchOptions struct {
 	timeout uint // Milliseconds to wait for a match, zero to not wait.
 }
 
-// WithProcessMatchTimeout sets how long to wait for a process to match before giving up (in seconds). Zero, the
-// default, does not wait.
+// WithProcessMatchTimeout sets how long to wait for a process to match before giving up (in milliseconds).
+// Zero, the default, does not wait.
 func WithProcessMatchTimeout(timeout uint) ProcessMatchOption {
 	return func(options *processMatchOptions) { options.timeout = timeout }
 }
