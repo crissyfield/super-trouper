@@ -42,6 +42,21 @@ func runAttach(cmd *cobra.Command, _ []string) error {
 
 	defer closeFridaManager(manager)
 
+	// Enumerate devices
+	devices, err := manager.EnumerateDevices(cmd.Context())
+	if err != nil {
+		return fmt.Errorf("enumerate Frida devices: %w", err)
+	}
+
+	for _, device := range devices {
+		slog.Info("Found Frida device",
+			slog.String("device_id", device.ID()),
+			slog.String("device_name", device.Name()),
+			slog.String("device_type", string(device.Type())),
+		)
+	}
+
+	// Connect to the target device
 	var device *frida.Device
 	if useUSB {
 		device, err = manager.GetDeviceByType(cmd.Context(), frida.DeviceTypeUSB)
