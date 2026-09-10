@@ -1,0 +1,141 @@
+# GoReleaser configuration format
+version: 2
+
+# Release project identity
+project_name: super-trouper
+
+# Build release binaries with target-specific Frida devkits
+builds:
+  # GNU/Linux amd64 with glibc
+  - id: linux-amd64
+    main: .
+    binary: super-trouper
+    goos: [linux]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=1
+      - CC=x86_64-linux-gnu-gcc
+      - "CGO_CFLAGS=-I{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-x86_64/include"
+      - "CGO_LDFLAGS=-L{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-x86_64/lib"
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.Version={{ .Version }}"]
+
+  # GNU/Linux amd64 with musl
+  - id: linux-amd64-musl
+    main: .
+    binary: super-trouper
+    goos: [linux]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=1
+      - "CC={{ .Env.RELEASE_DEPS }}/tools/zig/zig cc -target x86_64-linux-musl"
+      - "CGO_CFLAGS=-I{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-x86_64-musl/include"
+      - "CGO_LDFLAGS=-L{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-x86_64-musl/lib -lunwind"
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.Version={{ .Version }}"]
+
+  # GNU/Linux arm64 with glibc
+  - id: linux-arm64
+    main: .
+    binary: super-trouper
+    goos: [linux]
+    goarch: [arm64]
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+      - "CGO_CFLAGS=-I{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-arm64/include"
+      - "CGO_LDFLAGS=-L{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-arm64/lib"
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.Version={{ .Version }}"]
+
+  # GNU/Linux arm64 with musl
+  - id: linux-arm64-musl
+    main: .
+    binary: super-trouper
+    goos: [linux]
+    goarch: [arm64]
+    env:
+      - CGO_ENABLED=1
+      - "CC={{ .Env.RELEASE_DEPS }}/tools/zig/zig cc -target aarch64-linux-musl"
+      - "CGO_CFLAGS=-I{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-arm64-musl/include"
+      - "CGO_LDFLAGS=-L{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-arm64-musl/lib -lunwind"
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.Version={{ .Version }}"]
+
+  # GNU/Linux x86 with glibc
+  - id: linux-x86
+    main: .
+    binary: super-trouper
+    goos: [linux]
+    goarch: [386]
+    env:
+      - CGO_ENABLED=1
+      - "CC={{ .Env.RELEASE_DEPS }}/tools/zig/zig cc -target x86-linux-gnu"
+      - "CGO_CFLAGS=-I{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-x86/include"
+      - "CGO_LDFLAGS=-L{{ .Env.RELEASE_DEPS }}/frida-devkits/linux-x86/lib -lunwind"
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.Version={{ .Version }}"]
+
+  # macOS amd64 cross-compiled with osxcross
+  - id: macos-amd64
+    main: .
+    binary: super-trouper
+    goos: [darwin]
+    goarch: [amd64]
+    env:
+      - CGO_ENABLED=1
+      - CC=o64-clang
+      - MACOSX_DEPLOYMENT_TARGET=13.0
+      - "CGO_CFLAGS=-I{{ .Env.RELEASE_DEPS }}/frida-devkits/macos-x86_64/include"
+      - "CGO_LDFLAGS=-L{{ .Env.RELEASE_DEPS }}/frida-devkits/macos-x86_64/lib"
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.Version={{ .Version }}"]
+
+# Package release binaries for GitHub Releases
+archives:
+  # Standard Unix archives
+  - id: standard
+    ids: [linux-amd64, linux-arm64, macos-amd64]
+    formats: [tar.xz]
+    name_template: "{{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+
+  # GNU/Linux amd64 musl archive
+  - id: linux-amd64-musl
+    ids: [linux-amd64-musl]
+    formats: [tar.xz]
+    name_template: "{{ .ProjectName }}-{{ .Version }}-linux-amd64-musl"
+
+  # GNU/Linux arm64 musl archive
+  - id: linux-arm64-musl
+    ids: [linux-arm64-musl]
+    formats: [tar.xz]
+    name_template: "{{ .ProjectName }}-{{ .Version }}-linux-arm64-musl"
+
+  # GNU/Linux x86 archive
+  - id: linux-x86
+    ids: [linux-x86]
+    formats: [tar.xz]
+    name_template: "{{ .ProjectName }}-{{ .Version }}-linux-x86"
+
+# Do not generate GitHub Release notes from commit messages
+changelog:
+  disable: true
+
+# Include the native macOS arm64 archive in the release and its checksums
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: "{{ .Env.MACOS_ARM64_ARTIFACT_DIR }}/super-trouper-{{ .Version }}-darwin-arm64.tar.xz"
+
+release:
+  extra_files:
+    - glob: "{{ .Env.MACOS_ARM64_ARTIFACT_DIR }}/super-trouper-{{ .Version }}-darwin-arm64.tar.xz"
+
+# Build and publish multi-architecture images from the musl binaries
+dockers_v2:
+  - id: super-trouper
+    ids: [linux-amd64-musl, linux-arm64-musl]
+    images: ["ghcr.io/crissyfield/super-trouper"]
+    tags: ["{{ .Tag }}", latest]
+    dockerfile: etc/docker/Dockerfile
+    platforms: [linux/amd64, linux/arm64]

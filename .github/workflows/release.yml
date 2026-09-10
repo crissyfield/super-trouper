@@ -1,0 +1,193 @@
+name: Release
+
+# Release every version tag
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  # Create GitHub Releases and publish docker images
+  contents: write
+  packages: write
+
+jobs:
+  # Frida's macOS arm64 static library requires Apple's linker
+  build-macos-arm64-only:
+    runs-on: macos-15
+    permissions:
+      contents: read # Artifacts only
+
+    steps:
+      # Build binary from tagged source
+      - uses: actions/checkout@v7
+
+      # Install Go explicitly
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.0"
+
+      - name: Build macOS arm64 archive
+        env:
+          FRIDA_VERSION: 17.18.0
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          devkit="${RUNNER_TEMP}/frida-core-devkit"
+          staging="${RUNNER_TEMP}/super-trouper-macos-arm64"
+          archive="${RUNNER_TEMP}/super-trouper-${version}-darwin-arm64.tar.xz"
+          mkdir -p "${devkit}" "${staging}"
+          curl --fail --location --retry 3 --show-error "https://github.com/frida/frida/releases/download/${FRIDA_VERSION}/frida-core-devkit-${FRIDA_VERSION}-macos-arm64.tar.xz" | tar --extract --file - --xz --directory "${devkit}"
+          test -f "${devkit}/frida-core.h"
+          test -f "${devkit}/libfrida-core.a"
+          CGO_ENABLED=1 CGO_CFLAGS="-I${devkit}" CGO_LDFLAGS="-L${devkit}" MACOSX_DEPLOYMENT_TARGET=13.0 go build -trimpath -ldflags "-s -w -X main.Version=${version}" -o "${staging}/super-trouper" .
+          cp README.md "${staging}/README.md"
+          tar -cJf "${archive}" -C "${staging}" super-trouper README.md
+          test -f "${archive}"
+
+      # Transfer between runners
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-arm64-release
+          path: ${{ runner.temp }}/super-trouper-*-darwin-arm64.tar.xz
+          compression-level: 0
+          if-no-files-found: error
+
+  # Everything else is built and released via GoReleaser in a cross-compilation container
+  build-everything-else-and-release:
+    runs-on: ubuntu-24.04
+    needs: build-macos-arm64-only
+
+    steps:
+      # GoReleaser reads the full tag history to determine release metadata
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Make the native archive available to GoReleaser as a release extra file
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-arm64-release
+          path: ${{ runner.temp }}/super-trouper-macos-arm64-release
+
+      # The cross-compilation image and Frida devkits exceed the runner's default free space
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          docker system prune --all --force
+          df --human-readable
+
+      # Buildx uses QEMU to build the arm64 container image on the amd64 runner
+      - uses: docker/setup-qemu-action@v4
+
+      # dockers_v2 delegates multi-platform image builds and manifest publishing to Buildx
+      - uses: docker/setup-buildx-action@v4
+
+      # Authenticate Buildx to push the GHCR image manifest
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # This directory is mounted read-only into goreleaser-cross as RELEASE_DEPS
+      - name: Download Frida Core DevKits
+        env:
+          FRIDA_VERSION: 17.18.0
+          RELEASE_DEPS: ${{ runner.temp }}/super-trouper-release-deps
+        run: |
+          set -euo pipefail
+          base_url="https://github.com/frida/frida/releases/download/${FRIDA_VERSION}"
+
+          devkit_targets=(
+            linux-arm64
+            linux-arm64-musl
+            linux-x86
+            linux-x86_64
+            linux-x86_64-musl
+            macos-x86_64
+          )
+
+          for target in "${devkit_targets[@]}"; do
+            archive="frida-core-devkit-${FRIDA_VERSION}-${target}.tar.xz"
+            directory="${RELEASE_DEPS}/frida-devkits/${target}"
+            mkdir -p "${directory}"
+            curl --fail --location --retry 3 --show-error "${base_url}/${archive}" | tar --extract --file - --xz --directory "${directory}"
+            mkdir -p "${directory}/include" "${directory}/lib"
+            mv "${directory}/frida-core.h" "${directory}/include/frida-core.h"
+            mv "${directory}/libfrida-core.a" "${directory}/lib/libfrida-core.a"
+            test -f "${directory}/include/frida-core.h"
+            test -f "${directory}/lib/libfrida-core.a"
+          done
+
+      # Zig supplies the x86 and musl C cross-compilers not provided by the base image
+      - name: Download Zig
+        env:
+          ZIG_VERSION: 0.14.1
+          RELEASE_DEPS: ${{ runner.temp }}/super-trouper-release-deps
+        run: |
+          set -euo pipefail
+          archive="zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+          mkdir -p "${RELEASE_DEPS}/tools/zig"
+          curl --fail --location --retry 3 --show-error "https://ziglang.org/download/${ZIG_VERSION}/${archive}" | tar --extract --file - --xz --strip-components=1 --directory "${RELEASE_DEPS}/tools/zig"
+          test -x "${RELEASE_DEPS}/tools/zig/zig"
+
+      # Configuration validation does not build artifacts, so the repository can stay read-only
+      - name: Validate GoReleaser configuration
+        run: |
+          docker run --rm \
+            --volume "$PWD:/workspace:ro" \
+            --workdir /workspace \
+            ghcr.io/goreleaser/goreleaser-cross:v1.27.0 \
+            check
+
+      # Build and release all other targets in a disposable container
+      - name: Create release and publish images
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          docker run --rm \
+            --volume "$PWD:/workspace" \
+            --volume "$RUNNER_TEMP/super-trouper-release-deps:/release-deps:ro" \
+            --volume "$RUNNER_TEMP/super-trouper-macos-arm64-release:/workspace/release-assets:ro" \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$HOME/.docker:/root/.docker" \
+            --workdir /workspace \
+            --env GITHUB_TOKEN \
+            --env RELEASE_DEPS=/release-deps \
+            --env MACOS_ARM64_ARTIFACT_DIR=release-assets \
+            --entrypoint /bin/sh \
+            ghcr.io/goreleaser/goreleaser-cross:v1.27.0 \
+            -c '
+              set -eu
+              # Avoid 'dirty' error for GoReleaser
+              excludes_file="$(mktemp)"
+              printf "%s\n" "/release-assets/" > "${excludes_file}"
+              git config --global core.excludesFile "${excludes_file}"
+              git config --global --add safe.directory /workspace
+              git check-ignore --quiet release-assets
+              # Run GoReleaser
+              exec goreleaser release --clean --parallelism=1
+            '
+
+      # Check out homebrew tap
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: crissyfield/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      # Derive architecture-aware cask and publish to tap
+      - name: Publish Homebrew cask
+        run: |
+          set -euo pipefail
+          ./etc/homebrew/generate-cask.sh "${GITHUB_REF_NAME#v}" dist/checksums.txt homebrew-tap/Casks/super-trouper.rb
+          ruby -c homebrew-tap/Casks/super-trouper.rb
+          git -C homebrew-tap add Casks/super-trouper.rb
+          git -C homebrew-tap diff --cached --quiet -- Casks/super-trouper.rb && exit 0
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap commit -m "Update super-trouper to ${GITHUB_REF_NAME}"
+          git -C homebrew-tap push
