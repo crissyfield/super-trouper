@@ -58794,10 +58794,10 @@ G_END_DECLS
 
 #undef __JSON_GLIB_INSIDE__
 
-#define FRIDA_VERSION "17.17.0"
+#define FRIDA_VERSION "17.18.0"
 
 #define FRIDA_MAJOR_VERSION 17
-#define FRIDA_MINOR_VERSION 17
+#define FRIDA_MINOR_VERSION 18
 #define FRIDA_MICRO_VERSION 0
 #define FRIDA_NANO_VERSION 0
 
@@ -58819,6 +58819,33 @@ typedef struct _FridaDeviceManager FridaDeviceManager;
 typedef struct _FridaDeviceList FridaDeviceList;
 typedef struct _FridaDevice FridaDevice;
 typedef struct _FridaRemoteDeviceOptions FridaRemoteDeviceOptions;
+typedef struct _FridaBareboneDeviceOptions FridaBareboneDeviceOptions;
+typedef struct _FridaBareboneConfig FridaBareboneConfig;
+typedef struct _FridaBareboneConnectionConfig FridaBareboneConnectionConfig;
+typedef struct _FridaBareboneAllocatorConfig FridaBareboneAllocatorConfig;
+typedef struct _FridaBareboneInvalidAllocatorConfig FridaBareboneInvalidAllocatorConfig;
+typedef struct _FridaBarebonePhysicalAllocatorConfig FridaBarebonePhysicalAllocatorConfig;
+typedef struct _FridaBareboneTargetFunctionsAllocatorConfig FridaBareboneTargetFunctionsAllocatorConfig;
+typedef struct _FridaBareboneCallArgument FridaBareboneCallArgument;
+typedef struct _FridaBareboneAgentConfig FridaBareboneAgentConfig;
+typedef struct _FridaBareboneInvalidAgentConfig FridaBareboneInvalidAgentConfig;
+typedef struct _FridaBareboneInjectedAgentConfig FridaBareboneInjectedAgentConfig;
+typedef struct _FridaBareboneResidentAgentConfig FridaBareboneResidentAgentConfig;
+typedef struct _FridaBareboneTransportConfig FridaBareboneTransportConfig;
+typedef struct _FridaBareboneInjectingTransportConfig FridaBareboneInjectingTransportConfig;
+typedef struct _FridaBareboneResidentTransportConfig FridaBareboneResidentTransportConfig;
+typedef struct _FridaBareboneHostlinkTransportConfig FridaBareboneHostlinkTransportConfig;
+typedef struct _FridaBareboneHostlinkFabric FridaBareboneHostlinkFabric;
+typedef struct _FridaBareboneHostlinkEcamFabric FridaBareboneHostlinkEcamFabric;
+typedef struct _FridaBareboneHostlinkPortsFabric FridaBareboneHostlinkPortsFabric;
+typedef struct _FridaBareboneHostlinkMmioFabric FridaBareboneHostlinkMmioFabric;
+typedef struct _FridaBareboneVsockTransportConfig FridaBareboneVsockTransportConfig;
+typedef struct _FridaBareboneDeviceTransportConfig FridaBareboneDeviceTransportConfig;
+typedef struct _FridaBareboneSocketTransportConfig FridaBareboneSocketTransportConfig;
+typedef struct _FridaBareboneImageConfig FridaBareboneImageConfig;
+typedef struct _FridaBareboneMemoryAddress FridaBareboneMemoryAddress;
+typedef struct _FridaBareboneInvalidMemoryAddress FridaBareboneInvalidMemoryAddress;
+typedef struct _FridaBareboneNonNullMemoryAddress FridaBareboneNonNullMemoryAddress;
 typedef struct _FridaApplicationList FridaApplicationList;
 typedef struct _FridaApplication FridaApplication;
 typedef struct _FridaProcessList FridaProcessList;
@@ -58870,6 +58897,7 @@ typedef struct _FridaWebRequest FridaWebRequest;
 typedef struct _FridaWebResponse FridaWebResponse;
 typedef struct _FridaFileMonitor FridaFileMonitor;
 typedef struct _FridaCompiler FridaCompiler;
+typedef struct _FridaLanguageServer FridaLanguageServer;
 typedef struct _FridaCompilerOptions FridaCompilerOptions;
 typedef struct _FridaBuildOptions FridaBuildOptions;
 typedef struct _FridaWatchOptions FridaWatchOptions;
@@ -58884,6 +58912,26 @@ typedef enum {
   FRIDA_DEVICE_TYPE_REMOTE,
   FRIDA_DEVICE_TYPE_USB
 } FridaDeviceType;
+
+typedef enum {
+  FRIDA_BAREBONE_KERNEL_KIND_AUTO,
+  FRIDA_BAREBONE_KERNEL_KIND_BARE,
+  FRIDA_BAREBONE_KERNEL_KIND_WIN9X,
+  FRIDA_BAREBONE_KERNEL_KIND_WINNT,
+  FRIDA_BAREBONE_KERNEL_KIND_XNU,
+  FRIDA_BAREBONE_KERNEL_KIND_LINUX
+} FridaBareboneKernelKind;
+
+typedef enum {
+  FRIDA_BAREBONE_STUB_FLAVOR_GDB_REMOTE,
+  FRIDA_BAREBONE_STUB_FLAVOR_VZ
+} FridaBareboneStubFlavor;
+
+typedef enum {
+  FRIDA_BAREBONE_CALL_ARGUMENT_ROLE_SIZE,
+  FRIDA_BAREBONE_CALL_ARGUMENT_ROLE_ADDRESS,
+  FRIDA_BAREBONE_CALL_ARGUMENT_ROLE_LITERAL
+} FridaBareboneCallArgumentRole;
 
 typedef enum {
   FRIDA_PACKAGE_INSTALL_PHASE_INITIALIZING,
@@ -59530,6 +59578,7 @@ typedef enum {
 
 /* Library lifetime */
 void frida_init (void);
+void frida_init_with_runtime (FridaRuntime runtime);
 void frida_shutdown (void);
 void frida_deinit (void);
 GMainContext * frida_get_main_context (void);
@@ -59580,6 +59629,12 @@ FridaDevice * frida_device_manager_add_remote_device_sync (FridaDeviceManager * 
 void frida_device_manager_remove_remote_device (FridaDeviceManager * self, const gchar * address, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
 void frida_device_manager_remove_remote_device_finish (FridaDeviceManager * self, GAsyncResult * result, GError ** error);
 void frida_device_manager_remove_remote_device_sync (FridaDeviceManager * self, const gchar * address, GCancellable * cancellable, GError ** error);
+void frida_device_manager_add_barebone_device (FridaDeviceManager * self, FridaBareboneConfig * config, FridaBareboneDeviceOptions * options, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+FridaDevice * frida_device_manager_add_barebone_device_finish (FridaDeviceManager * self, GAsyncResult * result, GError ** error);
+FridaDevice * frida_device_manager_add_barebone_device_sync (FridaDeviceManager * self, FridaBareboneConfig * config, FridaBareboneDeviceOptions * options, GCancellable * cancellable, GError ** error);
+void frida_device_manager_remove_barebone_device (FridaDeviceManager * self, FridaDevice * device, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+void frida_device_manager_remove_barebone_device_finish (FridaDeviceManager * self, GAsyncResult * result, GError ** error);
+void frida_device_manager_remove_barebone_device_sync (FridaDeviceManager * self, FridaDevice * device, GCancellable * cancellable, GError ** error);
 
 /* DeviceList */
 gint frida_device_list_size (FridaDeviceList * self);
@@ -59681,6 +59736,189 @@ void frida_remote_device_options_set_certificate (FridaRemoteDeviceOptions * sel
 void frida_remote_device_options_set_origin (FridaRemoteDeviceOptions * self, const gchar * value);
 void frida_remote_device_options_set_token (FridaRemoteDeviceOptions * self, const gchar * value);
 void frida_remote_device_options_set_keepalive_interval (FridaRemoteDeviceOptions * self, gint value);
+
+/* BareboneDeviceOptions */
+FridaBareboneDeviceOptions * frida_barebone_device_options_new (void);
+
+const gchar * frida_barebone_device_options_get_id (FridaBareboneDeviceOptions * self);
+const gchar * frida_barebone_device_options_get_name (FridaBareboneDeviceOptions * self);
+GVariant * frida_barebone_device_options_get_icon (FridaBareboneDeviceOptions * self);
+
+void frida_barebone_device_options_set_id (FridaBareboneDeviceOptions * self, const gchar * value);
+void frida_barebone_device_options_set_name (FridaBareboneDeviceOptions * self, const gchar * value);
+void frida_barebone_device_options_set_icon (FridaBareboneDeviceOptions * self, GVariant * value);
+
+/* BareboneConfig */
+FridaBareboneConfig * frida_barebone_config_new (void);
+
+FridaBareboneConnectionConfig * frida_barebone_config_get_connection (FridaBareboneConfig * self);
+FridaBareboneAllocatorConfig * frida_barebone_config_get_allocator (FridaBareboneConfig * self);
+FridaBareboneAgentConfig * frida_barebone_config_get_agent (FridaBareboneConfig * self);
+FridaBareboneImageConfig * frida_barebone_config_get_image (FridaBareboneConfig * self);
+FridaBareboneKernelKind frida_barebone_config_get_kernel (FridaBareboneConfig * self);
+
+void frida_barebone_config_check (FridaBareboneConfig * self, GError ** error);
+void frida_barebone_config_set_connection (FridaBareboneConfig * self, FridaBareboneConnectionConfig * value);
+void frida_barebone_config_set_allocator (FridaBareboneConfig * self, FridaBareboneAllocatorConfig * value);
+void frida_barebone_config_set_agent (FridaBareboneConfig * self, FridaBareboneAgentConfig * value);
+void frida_barebone_config_set_image (FridaBareboneConfig * self, FridaBareboneImageConfig * value);
+void frida_barebone_config_set_kernel (FridaBareboneConfig * self, FridaBareboneKernelKind value);
+
+/* BareboneConnectionConfig */
+FridaBareboneConnectionConfig * frida_barebone_connection_config_new (void);
+
+const gchar * frida_barebone_connection_config_get_host (FridaBareboneConnectionConfig * self);
+guint16 frida_barebone_connection_config_get_port (FridaBareboneConnectionConfig * self);
+guint frida_barebone_connection_config_get_pid (FridaBareboneConnectionConfig * self);
+FridaBareboneStubFlavor frida_barebone_connection_config_get_flavor (FridaBareboneConnectionConfig * self);
+
+void frida_barebone_connection_config_set_host (FridaBareboneConnectionConfig * self, const gchar * value);
+void frida_barebone_connection_config_set_port (FridaBareboneConnectionConfig * self, guint16 value);
+void frida_barebone_connection_config_set_pid (FridaBareboneConnectionConfig * self, guint value);
+void frida_barebone_connection_config_set_flavor (FridaBareboneConnectionConfig * self, FridaBareboneStubFlavor value);
+
+/* BareboneAllocatorConfig */
+void frida_barebone_allocator_config_check (FridaBareboneAllocatorConfig * self, GError ** error);
+
+/* BareboneInvalidAllocatorConfig */
+FridaBareboneInvalidAllocatorConfig * frida_barebone_invalid_allocator_config_new (void);
+
+/* BarebonePhysicalAllocatorConfig */
+FridaBarebonePhysicalAllocatorConfig * frida_barebone_physical_allocator_config_new (void);
+
+FridaBareboneMemoryAddress * frida_barebone_physical_allocator_config_get_physical_base (FridaBarebonePhysicalAllocatorConfig * self);
+
+void frida_barebone_physical_allocator_config_set_physical_base (FridaBarebonePhysicalAllocatorConfig * self, FridaBareboneMemoryAddress * value);
+
+/* BareboneTargetFunctionsAllocatorConfig */
+FridaBareboneTargetFunctionsAllocatorConfig * frida_barebone_target_functions_allocator_config_new (void);
+
+FridaBareboneMemoryAddress * frida_barebone_target_functions_allocator_config_get_alloc_function (FridaBareboneTargetFunctionsAllocatorConfig * self);
+FridaBareboneMemoryAddress * frida_barebone_target_functions_allocator_config_get_free_function (FridaBareboneTargetFunctionsAllocatorConfig * self);
+guint64 frida_barebone_target_functions_allocator_config_get_alloc_flags (FridaBareboneTargetFunctionsAllocatorConfig * self);
+
+void frida_barebone_target_functions_allocator_config_clear_alloc_arguments (FridaBareboneTargetFunctionsAllocatorConfig * self);
+void frida_barebone_target_functions_allocator_config_add_alloc_argument (FridaBareboneTargetFunctionsAllocatorConfig * self, FridaBareboneCallArgument * argument);
+void frida_barebone_target_functions_allocator_config_enumerate_alloc_arguments (FridaBareboneTargetFunctionsAllocatorConfig * self, GFunc func, gpointer user_data);
+void frida_barebone_target_functions_allocator_config_clear_free_arguments (FridaBareboneTargetFunctionsAllocatorConfig * self);
+void frida_barebone_target_functions_allocator_config_add_free_argument (FridaBareboneTargetFunctionsAllocatorConfig * self, FridaBareboneCallArgument * argument);
+void frida_barebone_target_functions_allocator_config_enumerate_free_arguments (FridaBareboneTargetFunctionsAllocatorConfig * self, GFunc func, gpointer user_data);
+void frida_barebone_target_functions_allocator_config_set_alloc_function (FridaBareboneTargetFunctionsAllocatorConfig * self, FridaBareboneMemoryAddress * value);
+void frida_barebone_target_functions_allocator_config_set_free_function (FridaBareboneTargetFunctionsAllocatorConfig * self, FridaBareboneMemoryAddress * value);
+void frida_barebone_target_functions_allocator_config_set_alloc_flags (FridaBareboneTargetFunctionsAllocatorConfig * self, guint64 value);
+
+/* BareboneCallArgument */
+FridaBareboneCallArgument * frida_barebone_call_argument_new (FridaBareboneCallArgumentRole role, guint64 value);
+
+FridaBareboneCallArgumentRole frida_barebone_call_argument_get_role (FridaBareboneCallArgument * self);
+guint64 frida_barebone_call_argument_get_value (FridaBareboneCallArgument * self);
+
+/* BareboneAgentConfig */
+void frida_barebone_agent_config_check (FridaBareboneAgentConfig * self, GError ** error);
+
+/* BareboneInvalidAgentConfig */
+FridaBareboneInvalidAgentConfig * frida_barebone_invalid_agent_config_new (void);
+
+/* BareboneInjectedAgentConfig */
+FridaBareboneInjectedAgentConfig * frida_barebone_injected_agent_config_new_from_bytes (GBytes * image, FridaBareboneInjectingTransportConfig * transport);
+FridaBareboneInjectedAgentConfig * frida_barebone_injected_agent_config_new_from_file (const gchar * path, FridaBareboneInjectingTransportConfig * transport, GError ** error);
+FridaBareboneInjectedAgentConfig * frida_barebone_injected_agent_config_new (void);
+
+GBytes * frida_barebone_injected_agent_config_get_image (FridaBareboneInjectedAgentConfig * self);
+FridaBareboneInjectingTransportConfig * frida_barebone_injected_agent_config_get_transport (FridaBareboneInjectedAgentConfig * self);
+
+FridaBareboneInjectedAgentConfig * frida_barebone_injected_agent_config_construct_from_bytes (GType object_type, GBytes * image, FridaBareboneInjectingTransportConfig * transport);
+FridaBareboneInjectedAgentConfig * frida_barebone_injected_agent_config_construct_from_file (GType object_type, const gchar * path, FridaBareboneInjectingTransportConfig * transport, GError ** error);
+void frida_barebone_injected_agent_config_set_image (FridaBareboneInjectedAgentConfig * self, GBytes * value);
+void frida_barebone_injected_agent_config_set_transport (FridaBareboneInjectedAgentConfig * self, FridaBareboneInjectingTransportConfig * value);
+
+/* BareboneResidentAgentConfig */
+FridaBareboneResidentAgentConfig * frida_barebone_resident_agent_config_new (FridaBareboneResidentTransportConfig * transport);
+
+FridaBareboneResidentTransportConfig * frida_barebone_resident_agent_config_get_transport (FridaBareboneResidentAgentConfig * self);
+
+void frida_barebone_resident_agent_config_set_transport (FridaBareboneResidentAgentConfig * self, FridaBareboneResidentTransportConfig * value);
+
+/* BareboneTransportConfig */
+void frida_barebone_transport_config_check (FridaBareboneTransportConfig * self, GError ** error);
+
+/* BareboneInjectingTransportConfig */
+
+/* BareboneResidentTransportConfig */
+
+/* BareboneHostlinkTransportConfig */
+FridaBareboneHostlinkTransportConfig * frida_barebone_hostlink_transport_config_new (void);
+
+const gchar * frida_barebone_hostlink_transport_config_get_qmp (FridaBareboneHostlinkTransportConfig * self);
+const gchar * frida_barebone_hostlink_transport_config_get_bus (FridaBareboneHostlinkTransportConfig * self);
+FridaBareboneHostlinkFabric * frida_barebone_hostlink_transport_config_get_fabric (FridaBareboneHostlinkTransportConfig * self);
+
+void frida_barebone_hostlink_transport_config_set_qmp (FridaBareboneHostlinkTransportConfig * self, const gchar * value);
+void frida_barebone_hostlink_transport_config_set_bus (FridaBareboneHostlinkTransportConfig * self, const gchar * value);
+void frida_barebone_hostlink_transport_config_set_fabric (FridaBareboneHostlinkTransportConfig * self, FridaBareboneHostlinkFabric * value);
+
+/* BareboneHostlinkFabric */
+
+/* BareboneHostlinkEcamFabric */
+FridaBareboneHostlinkEcamFabric * frida_barebone_hostlink_ecam_fabric_new (guint64 ecam);
+
+guint64 frida_barebone_hostlink_ecam_fabric_get_ecam (FridaBareboneHostlinkEcamFabric * self);
+
+void frida_barebone_hostlink_ecam_fabric_set_ecam (FridaBareboneHostlinkEcamFabric * self, guint64 value);
+
+/* BareboneHostlinkPortsFabric */
+FridaBareboneHostlinkPortsFabric * frida_barebone_hostlink_ports_fabric_new (void);
+
+/* BareboneHostlinkMmioFabric */
+FridaBareboneHostlinkMmioFabric * frida_barebone_hostlink_mmio_fabric_new (void);
+
+/* BareboneVsockTransportConfig */
+FridaBareboneVsockTransportConfig * frida_barebone_vsock_transport_config_new (void);
+
+const gchar * frida_barebone_vsock_transport_config_get_socket_path (FridaBareboneVsockTransportConfig * self);
+guint frida_barebone_vsock_transport_config_get_port (FridaBareboneVsockTransportConfig * self);
+
+void frida_barebone_vsock_transport_config_set_socket_path (FridaBareboneVsockTransportConfig * self, const gchar * value);
+void frida_barebone_vsock_transport_config_set_port (FridaBareboneVsockTransportConfig * self, guint value);
+
+/* BareboneDeviceTransportConfig */
+FridaBareboneDeviceTransportConfig * frida_barebone_device_transport_config_new (void);
+
+const gchar * frida_barebone_device_transport_config_get_path (FridaBareboneDeviceTransportConfig * self);
+
+void frida_barebone_device_transport_config_set_path (FridaBareboneDeviceTransportConfig * self, const gchar * value);
+
+/* BareboneSocketTransportConfig */
+FridaBareboneSocketTransportConfig * frida_barebone_socket_transport_config_new (void);
+
+const gchar * frida_barebone_socket_transport_config_get_path (FridaBareboneSocketTransportConfig * self);
+
+void frida_barebone_socket_transport_config_set_path (FridaBareboneSocketTransportConfig * self, const gchar * value);
+
+/* BareboneImageConfig */
+FridaBareboneImageConfig * frida_barebone_image_config_new (void);
+
+const gchar * frida_barebone_image_config_get_file (FridaBareboneImageConfig * self);
+FridaBareboneMemoryAddress * frida_barebone_image_config_get_base (FridaBareboneImageConfig * self);
+
+void frida_barebone_image_config_clear_symbols (FridaBareboneImageConfig * self);
+void frida_barebone_image_config_add_symbol (FridaBareboneImageConfig * self, const gchar * name, guint64 address);
+void frida_barebone_image_config_enumerate_symbols (FridaBareboneImageConfig * self, GHFunc func, gpointer user_data);
+void frida_barebone_image_config_check (FridaBareboneImageConfig * self, GError ** error);
+void frida_barebone_image_config_set_file (FridaBareboneImageConfig * self, const gchar * value);
+void frida_barebone_image_config_set_base (FridaBareboneImageConfig * self, FridaBareboneMemoryAddress * value);
+
+/* BareboneMemoryAddress */
+const gchar * frida_barebone_memory_address_get_label (FridaBareboneMemoryAddress * self);
+guint64 frida_barebone_memory_address_get_address (FridaBareboneMemoryAddress * self);
+
+void frida_barebone_memory_address_check (FridaBareboneMemoryAddress * self, GError ** error);
+
+/* BareboneInvalidMemoryAddress */
+FridaBareboneInvalidMemoryAddress * frida_barebone_invalid_memory_address_new (const gchar * label);
+
+/* BareboneNonNullMemoryAddress */
+FridaBareboneNonNullMemoryAddress * frida_barebone_non_null_memory_address_new (const gchar * label, guint64 address);
 
 /* ApplicationList */
 gint frida_application_list_size (FridaApplicationList * self);
@@ -60184,6 +60422,17 @@ void frida_compiler_watch_finish (FridaCompiler * self, GAsyncResult * result, G
 void frida_compiler_watch_sync (FridaCompiler * self, const gchar * entrypoint, FridaWatchOptions * options, GCancellable * cancellable, GError ** error);
 void frida_compiler_schedule_on_frida_thread (FridaCompiler * self, GSourceFunc function, gpointer function_target, GDestroyNotify function_target_destroy_notify);
 
+/* LanguageServer */
+FridaLanguageServer * frida_language_server_new (const gchar * project_root);
+
+const gchar * frida_language_server_get_project_root (FridaLanguageServer * self);
+
+void frida_language_server_start (FridaLanguageServer * self, GCancellable * cancellable, GAsyncReadyCallback callback, gpointer user_data);
+void frida_language_server_start_finish (FridaLanguageServer * self, GAsyncResult * result, GError ** error);
+void frida_language_server_start_sync (FridaLanguageServer * self, GCancellable * cancellable, GError ** error);
+void frida_language_server_stop (FridaLanguageServer * self);
+void frida_language_server_post (FridaLanguageServer * self, const gchar * json, GError ** error);
+
 /* CompilerOptions */
 FridaCompilerOptions * frida_compiler_options_new (void);
 
@@ -60213,6 +60462,8 @@ FridaBuildOptions * frida_build_options_new (void);
 FridaWatchOptions * frida_watch_options_new (void);
 
 /* Toplevel functions */
+GVariant * frida_icon_from_png (guint8 * png, gint png_length, guint16 width, guint16 height);
+GVariant * frida_icon_from_rgba (guint8 * pixels, gint pixels_length, guint16 width, guint16 height);
 
 /* Errors */
 GQuark frida_error_quark (void);
@@ -60236,6 +60487,9 @@ typedef enum {
 /* GTypes */
 GType frida_runtime_get_type (void) G_GNUC_CONST;
 GType frida_device_type_get_type (void) G_GNUC_CONST;
+GType frida_barebone_kernel_kind_get_type (void) G_GNUC_CONST;
+GType frida_barebone_stub_flavor_get_type (void) G_GNUC_CONST;
+GType frida_barebone_call_argument_role_get_type (void) G_GNUC_CONST;
 GType frida_package_install_phase_get_type (void) G_GNUC_CONST;
 GType frida_package_role_get_type (void) G_GNUC_CONST;
 GType frida_output_format_get_type (void) G_GNUC_CONST;
@@ -60262,6 +60516,33 @@ GType frida_device_manager_get_type (void) G_GNUC_CONST;
 GType frida_device_list_get_type (void) G_GNUC_CONST;
 GType frida_device_get_type (void) G_GNUC_CONST;
 GType frida_remote_device_options_get_type (void) G_GNUC_CONST;
+GType frida_barebone_device_options_get_type (void) G_GNUC_CONST;
+GType frida_barebone_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_connection_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_allocator_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_invalid_allocator_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_physical_allocator_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_target_functions_allocator_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_call_argument_get_type (void) G_GNUC_CONST;
+GType frida_barebone_agent_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_invalid_agent_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_injected_agent_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_resident_agent_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_injecting_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_resident_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_hostlink_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_hostlink_fabric_get_type (void) G_GNUC_CONST;
+GType frida_barebone_hostlink_ecam_fabric_get_type (void) G_GNUC_CONST;
+GType frida_barebone_hostlink_ports_fabric_get_type (void) G_GNUC_CONST;
+GType frida_barebone_hostlink_mmio_fabric_get_type (void) G_GNUC_CONST;
+GType frida_barebone_vsock_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_device_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_socket_transport_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_image_config_get_type (void) G_GNUC_CONST;
+GType frida_barebone_memory_address_get_type (void) G_GNUC_CONST;
+GType frida_barebone_invalid_memory_address_get_type (void) G_GNUC_CONST;
+GType frida_barebone_non_null_memory_address_get_type (void) G_GNUC_CONST;
 GType frida_application_list_get_type (void) G_GNUC_CONST;
 GType frida_application_get_type (void) G_GNUC_CONST;
 GType frida_process_list_get_type (void) G_GNUC_CONST;
@@ -60309,6 +60590,7 @@ GType frida_web_request_get_type (void) G_GNUC_CONST;
 GType frida_web_response_get_type (void) G_GNUC_CONST;
 GType frida_file_monitor_get_type (void) G_GNUC_CONST;
 GType frida_compiler_get_type (void) G_GNUC_CONST;
+GType frida_language_server_get_type (void) G_GNUC_CONST;
 GType frida_compiler_options_get_type (void) G_GNUC_CONST;
 GType frida_build_options_get_type (void) G_GNUC_CONST;
 GType frida_watch_options_get_type (void) G_GNUC_CONST;
@@ -60317,6 +60599,12 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 #define FRIDA_TYPE_RUNTIME (frida_runtime_get_type ())
 
 #define FRIDA_TYPE_DEVICE_TYPE (frida_device_type_get_type ())
+
+#define FRIDA_TYPE_BAREBONE_KERNEL_KIND (frida_barebone_kernel_kind_get_type ())
+
+#define FRIDA_TYPE_BAREBONE_STUB_FLAVOR (frida_barebone_stub_flavor_get_type ())
+
+#define FRIDA_TYPE_BAREBONE_CALL_ARGUMENT_ROLE (frida_barebone_call_argument_role_get_type ())
 
 #define FRIDA_TYPE_PACKAGE_INSTALL_PHASE (frida_package_install_phase_get_type ())
 
@@ -60377,6 +60665,114 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 #define FRIDA_TYPE_REMOTE_DEVICE_OPTIONS (frida_remote_device_options_get_type ())
 #define FRIDA_REMOTE_DEVICE_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_REMOTE_DEVICE_OPTIONS, FridaRemoteDeviceOptions))
 #define FRIDA_IS_REMOTE_DEVICE_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_REMOTE_DEVICE_OPTIONS))
+
+#define FRIDA_TYPE_BAREBONE_DEVICE_OPTIONS (frida_barebone_device_options_get_type ())
+#define FRIDA_BAREBONE_DEVICE_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_DEVICE_OPTIONS, FridaBareboneDeviceOptions))
+#define FRIDA_IS_BAREBONE_DEVICE_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_DEVICE_OPTIONS))
+
+#define FRIDA_TYPE_BAREBONE_CONFIG (frida_barebone_config_get_type ())
+#define FRIDA_BAREBONE_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_CONFIG, FridaBareboneConfig))
+#define FRIDA_IS_BAREBONE_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_CONNECTION_CONFIG (frida_barebone_connection_config_get_type ())
+#define FRIDA_BAREBONE_CONNECTION_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_CONNECTION_CONFIG, FridaBareboneConnectionConfig))
+#define FRIDA_IS_BAREBONE_CONNECTION_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_CONNECTION_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_ALLOCATOR_CONFIG (frida_barebone_allocator_config_get_type ())
+#define FRIDA_BAREBONE_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_ALLOCATOR_CONFIG, FridaBareboneAllocatorConfig))
+#define FRIDA_IS_BAREBONE_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_ALLOCATOR_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_INVALID_ALLOCATOR_CONFIG (frida_barebone_invalid_allocator_config_get_type ())
+#define FRIDA_BAREBONE_INVALID_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_INVALID_ALLOCATOR_CONFIG, FridaBareboneInvalidAllocatorConfig))
+#define FRIDA_IS_BAREBONE_INVALID_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_INVALID_ALLOCATOR_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_PHYSICAL_ALLOCATOR_CONFIG (frida_barebone_physical_allocator_config_get_type ())
+#define FRIDA_BAREBONE_PHYSICAL_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_PHYSICAL_ALLOCATOR_CONFIG, FridaBarebonePhysicalAllocatorConfig))
+#define FRIDA_IS_BAREBONE_PHYSICAL_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_PHYSICAL_ALLOCATOR_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_TARGET_FUNCTIONS_ALLOCATOR_CONFIG (frida_barebone_target_functions_allocator_config_get_type ())
+#define FRIDA_BAREBONE_TARGET_FUNCTIONS_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_TARGET_FUNCTIONS_ALLOCATOR_CONFIG, FridaBareboneTargetFunctionsAllocatorConfig))
+#define FRIDA_IS_BAREBONE_TARGET_FUNCTIONS_ALLOCATOR_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_TARGET_FUNCTIONS_ALLOCATOR_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_CALL_ARGUMENT (frida_barebone_call_argument_get_type ())
+#define FRIDA_BAREBONE_CALL_ARGUMENT(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_CALL_ARGUMENT, FridaBareboneCallArgument))
+#define FRIDA_IS_BAREBONE_CALL_ARGUMENT(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_CALL_ARGUMENT))
+
+#define FRIDA_TYPE_BAREBONE_AGENT_CONFIG (frida_barebone_agent_config_get_type ())
+#define FRIDA_BAREBONE_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_AGENT_CONFIG, FridaBareboneAgentConfig))
+#define FRIDA_IS_BAREBONE_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_AGENT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_INVALID_AGENT_CONFIG (frida_barebone_invalid_agent_config_get_type ())
+#define FRIDA_BAREBONE_INVALID_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_INVALID_AGENT_CONFIG, FridaBareboneInvalidAgentConfig))
+#define FRIDA_IS_BAREBONE_INVALID_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_INVALID_AGENT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_INJECTED_AGENT_CONFIG (frida_barebone_injected_agent_config_get_type ())
+#define FRIDA_BAREBONE_INJECTED_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_INJECTED_AGENT_CONFIG, FridaBareboneInjectedAgentConfig))
+#define FRIDA_IS_BAREBONE_INJECTED_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_INJECTED_AGENT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_RESIDENT_AGENT_CONFIG (frida_barebone_resident_agent_config_get_type ())
+#define FRIDA_BAREBONE_RESIDENT_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_RESIDENT_AGENT_CONFIG, FridaBareboneResidentAgentConfig))
+#define FRIDA_IS_BAREBONE_RESIDENT_AGENT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_RESIDENT_AGENT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_TRANSPORT_CONFIG (frida_barebone_transport_config_get_type ())
+#define FRIDA_BAREBONE_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_TRANSPORT_CONFIG, FridaBareboneTransportConfig))
+#define FRIDA_IS_BAREBONE_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_INJECTING_TRANSPORT_CONFIG (frida_barebone_injecting_transport_config_get_type ())
+#define FRIDA_BAREBONE_INJECTING_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_INJECTING_TRANSPORT_CONFIG, FridaBareboneInjectingTransportConfig))
+#define FRIDA_IS_BAREBONE_INJECTING_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_INJECTING_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_RESIDENT_TRANSPORT_CONFIG (frida_barebone_resident_transport_config_get_type ())
+#define FRIDA_BAREBONE_RESIDENT_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_RESIDENT_TRANSPORT_CONFIG, FridaBareboneResidentTransportConfig))
+#define FRIDA_IS_BAREBONE_RESIDENT_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_RESIDENT_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_HOSTLINK_TRANSPORT_CONFIG (frida_barebone_hostlink_transport_config_get_type ())
+#define FRIDA_BAREBONE_HOSTLINK_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_TRANSPORT_CONFIG, FridaBareboneHostlinkTransportConfig))
+#define FRIDA_IS_BAREBONE_HOSTLINK_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_HOSTLINK_FABRIC (frida_barebone_hostlink_fabric_get_type ())
+#define FRIDA_BAREBONE_HOSTLINK_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_FABRIC, FridaBareboneHostlinkFabric))
+#define FRIDA_IS_BAREBONE_HOSTLINK_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_FABRIC))
+
+#define FRIDA_TYPE_BAREBONE_HOSTLINK_ECAM_FABRIC (frida_barebone_hostlink_ecam_fabric_get_type ())
+#define FRIDA_BAREBONE_HOSTLINK_ECAM_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_ECAM_FABRIC, FridaBareboneHostlinkEcamFabric))
+#define FRIDA_IS_BAREBONE_HOSTLINK_ECAM_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_ECAM_FABRIC))
+
+#define FRIDA_TYPE_BAREBONE_HOSTLINK_PORTS_FABRIC (frida_barebone_hostlink_ports_fabric_get_type ())
+#define FRIDA_BAREBONE_HOSTLINK_PORTS_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_PORTS_FABRIC, FridaBareboneHostlinkPortsFabric))
+#define FRIDA_IS_BAREBONE_HOSTLINK_PORTS_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_PORTS_FABRIC))
+
+#define FRIDA_TYPE_BAREBONE_HOSTLINK_MMIO_FABRIC (frida_barebone_hostlink_mmio_fabric_get_type ())
+#define FRIDA_BAREBONE_HOSTLINK_MMIO_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_MMIO_FABRIC, FridaBareboneHostlinkMmioFabric))
+#define FRIDA_IS_BAREBONE_HOSTLINK_MMIO_FABRIC(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_HOSTLINK_MMIO_FABRIC))
+
+#define FRIDA_TYPE_BAREBONE_VSOCK_TRANSPORT_CONFIG (frida_barebone_vsock_transport_config_get_type ())
+#define FRIDA_BAREBONE_VSOCK_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_VSOCK_TRANSPORT_CONFIG, FridaBareboneVsockTransportConfig))
+#define FRIDA_IS_BAREBONE_VSOCK_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_VSOCK_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_DEVICE_TRANSPORT_CONFIG (frida_barebone_device_transport_config_get_type ())
+#define FRIDA_BAREBONE_DEVICE_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_DEVICE_TRANSPORT_CONFIG, FridaBareboneDeviceTransportConfig))
+#define FRIDA_IS_BAREBONE_DEVICE_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_DEVICE_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_SOCKET_TRANSPORT_CONFIG (frida_barebone_socket_transport_config_get_type ())
+#define FRIDA_BAREBONE_SOCKET_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_SOCKET_TRANSPORT_CONFIG, FridaBareboneSocketTransportConfig))
+#define FRIDA_IS_BAREBONE_SOCKET_TRANSPORT_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_SOCKET_TRANSPORT_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_IMAGE_CONFIG (frida_barebone_image_config_get_type ())
+#define FRIDA_BAREBONE_IMAGE_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_IMAGE_CONFIG, FridaBareboneImageConfig))
+#define FRIDA_IS_BAREBONE_IMAGE_CONFIG(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_IMAGE_CONFIG))
+
+#define FRIDA_TYPE_BAREBONE_MEMORY_ADDRESS (frida_barebone_memory_address_get_type ())
+#define FRIDA_BAREBONE_MEMORY_ADDRESS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_MEMORY_ADDRESS, FridaBareboneMemoryAddress))
+#define FRIDA_IS_BAREBONE_MEMORY_ADDRESS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_MEMORY_ADDRESS))
+
+#define FRIDA_TYPE_BAREBONE_INVALID_MEMORY_ADDRESS (frida_barebone_invalid_memory_address_get_type ())
+#define FRIDA_BAREBONE_INVALID_MEMORY_ADDRESS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_INVALID_MEMORY_ADDRESS, FridaBareboneInvalidMemoryAddress))
+#define FRIDA_IS_BAREBONE_INVALID_MEMORY_ADDRESS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_INVALID_MEMORY_ADDRESS))
+
+#define FRIDA_TYPE_BAREBONE_NON_NULL_MEMORY_ADDRESS (frida_barebone_non_null_memory_address_get_type ())
+#define FRIDA_BAREBONE_NON_NULL_MEMORY_ADDRESS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_BAREBONE_NON_NULL_MEMORY_ADDRESS, FridaBareboneNonNullMemoryAddress))
+#define FRIDA_IS_BAREBONE_NON_NULL_MEMORY_ADDRESS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_BAREBONE_NON_NULL_MEMORY_ADDRESS))
 
 #define FRIDA_TYPE_APPLICATION_LIST (frida_application_list_get_type ())
 #define FRIDA_APPLICATION_LIST(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_APPLICATION_LIST, FridaApplicationList))
@@ -60566,6 +60962,10 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 #define FRIDA_COMPILER(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_COMPILER, FridaCompiler))
 #define FRIDA_IS_COMPILER(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_COMPILER))
 
+#define FRIDA_TYPE_LANGUAGE_SERVER (frida_language_server_get_type ())
+#define FRIDA_LANGUAGE_SERVER(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_LANGUAGE_SERVER, FridaLanguageServer))
+#define FRIDA_IS_LANGUAGE_SERVER(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_LANGUAGE_SERVER))
+
 #define FRIDA_TYPE_COMPILER_OPTIONS (frida_compiler_options_get_type ())
 #define FRIDA_COMPILER_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_CAST ((obj), FRIDA_TYPE_COMPILER_OPTIONS, FridaCompilerOptions))
 #define FRIDA_IS_COMPILER_OPTIONS(obj) (G_TYPE_CHECK_INSTANCE_TYPE ((obj), FRIDA_TYPE_COMPILER_OPTIONS))
@@ -60583,3 +60983,87 @@ GType frida_watch_options_get_type (void) G_GNUC_CONST;
 G_END_DECLS
 
 #endif
+/* GIO - GLib Input, Output and Streaming Library
+ *
+ * Copyright © 2009 Codethink Limited
+ *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General
+ * Public License along with this library; if not, see <http://www.gnu.org/licenses/>.
+ *
+ * Authors: Ryan Lortie <desrt@desrt.ca>
+ */
+
+#ifndef __G_UNIX_FD_MESSAGE_H__
+#define __G_UNIX_FD_MESSAGE_H__
+
+
+G_BEGIN_DECLS
+
+#define G_TYPE_UNIX_FD_MESSAGE                              (g_unix_fd_message_get_type ())
+#define G_UNIX_FD_MESSAGE(inst)                             (G_TYPE_CHECK_INSTANCE_CAST ((inst),                     \
+                                                             G_TYPE_UNIX_FD_MESSAGE, GUnixFDMessage))
+#define G_UNIX_FD_MESSAGE_CLASS(class)                      (G_TYPE_CHECK_CLASS_CAST ((class),                       \
+                                                             G_TYPE_UNIX_FD_MESSAGE, GUnixFDMessageClass))
+#define G_IS_UNIX_FD_MESSAGE(inst)                          (G_TYPE_CHECK_INSTANCE_TYPE ((inst),                     \
+                                                             G_TYPE_UNIX_FD_MESSAGE))
+#define G_IS_UNIX_FD_MESSAGE_CLASS(class)                   (G_TYPE_CHECK_CLASS_TYPE ((class),                       \
+                                                             G_TYPE_UNIX_FD_MESSAGE))
+#define G_UNIX_FD_MESSAGE_GET_CLASS(inst)                   (G_TYPE_INSTANCE_GET_CLASS ((inst),                      \
+                                                             G_TYPE_UNIX_FD_MESSAGE, GUnixFDMessageClass))
+
+typedef struct _GUnixFDMessagePrivate                       GUnixFDMessagePrivate;
+typedef struct _GUnixFDMessageClass                         GUnixFDMessageClass;
+typedef struct _GUnixFDMessage                              GUnixFDMessage;
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(GUnixFDMessage, g_object_unref)
+
+struct _GUnixFDMessageClass
+{
+  GSocketControlMessageClass parent_class;
+
+  /*< private >*/
+
+  /* Padding for future expansion */
+  void (*_g_reserved1) (void);
+  void (*_g_reserved2) (void);
+};
+
+struct _GUnixFDMessage
+{
+  GSocketControlMessage parent_instance;
+  GUnixFDMessagePrivate *priv;
+};
+
+GIO_AVAILABLE_IN_ALL
+GType                   g_unix_fd_message_get_type                      (void) G_GNUC_CONST;
+GIO_AVAILABLE_IN_ALL
+GSocketControlMessage * g_unix_fd_message_new_with_fd_list              (GUnixFDList     *fd_list);
+GIO_AVAILABLE_IN_ALL
+GSocketControlMessage * g_unix_fd_message_new                           (void);
+
+GIO_AVAILABLE_IN_ALL
+GUnixFDList *           g_unix_fd_message_get_fd_list                   (GUnixFDMessage  *message);
+
+GIO_AVAILABLE_IN_ALL
+gint *                  g_unix_fd_message_steal_fds                     (GUnixFDMessage  *message,
+                                                                         gint            *length);
+GIO_AVAILABLE_IN_ALL
+gboolean                g_unix_fd_message_append_fd                     (GUnixFDMessage  *message,
+                                                                         gint             fd,
+                                                                         GError         **error);
+
+G_END_DECLS
+
+#endif /* __G_UNIX_FD_MESSAGE_H__ */
