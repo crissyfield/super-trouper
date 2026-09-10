@@ -4,6 +4,7 @@ package frida
 #cgo LDFLAGS: -lfrida-core -lm
 #cgo darwin LDFLAGS: -lbsm -framework IOKit -framework Foundation -framework AppKit -framework Security -lpthread
 #cgo linux LDFLAGS: -ldl -lrt -lresolv -lpthread
+#cgo windows LDFLAGS: -ladvapi32 -lcrypt32 -ldnsapi -lgdi32 -liphlpapi -lkernel32 -lole32 -lpsapi -lsecur32 -lshell32 -lshlwapi -luser32 -lwinmm -lws2_32
 #include <stdlib.h>
 #include <frida-core.h>
 */
