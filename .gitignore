@@ -1,1 +1,2 @@
-etc/frida-core-devkit/lib/libfrida-core.a
+/etc/frida-core-devkit/lib/libfrida-core.a
+/opencode.json
