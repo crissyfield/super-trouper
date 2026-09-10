@@ -41,6 +41,7 @@ func New(manager *frida.Manager, version string) *MCPServer {
 	}
 
 	// Add tools
+	server.addStatusTools()
 	server.addDevicesTools()
 	server.addApplicationsTools()
 	server.addProcessesTools()
