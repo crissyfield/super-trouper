@@ -2,13 +2,13 @@
 
 ## Commands
 
-- The project links `frida-core` via CGO, so Go tooling requires a Frida Core devkit: set `FRIDA_DEVKIT` to a directory containing `include/frida-core.h` and `lib/libfrida-core.a`, for example `export FRIDA_DEVKIT="$PWD/etc/frida-core-devkit"`. The current Frida C header is `etc/frida-core-devkit/include/frida-core.h`.
-- `make vet`, `make build`, `make install`, and `make run` wrap the Go tooling with the required devkit flags; `make run` executes `go run . attach`.
+- The project links `frida-core` via CGO, so Go tooling requires a Frida Core devkit matching the build host. If it is not installed in a standard location, set `CGO_ENABLED=1`, `CGO_CFLAGS="-I/path/to/frida-core-devkit/include"`, and `CGO_LDFLAGS="-L/path/to/frida-core-devkit/lib"`.
+- Use `go vet ./...`, `go build ./...`, `go install .`, and `go run . attach` directly; the CGO environment must be set for each command when the devkit is in a non-standard location.
 - Format changed Go files with `gofmt -w <files>`.
-- `make vet` is the fast verification; `golangci-lint run ./...` is the full lint check (`.golangci.yml` v2).
+- `go vet ./...` is the fast verification; `golangci-lint run ./...` is the full lint check (`.golangci.yml` v2).
 - NEVER add test files to this project.
 - On a SIP-enabled macOS host without root, process injection fails with a frida-core timeout ("Timeout was reached"), so end-to-end testing of attach and the evaluator needs privileges; device listing, application/process listing, spawning, and killing work without them.
-- Typical post-edit flow: `gofmt -w <files>`, then `make vet` (or `golangci-lint run ./...` for full lint), then `make build`.
+- Typical post-edit flow: `gofmt -w <files>`, then `go vet ./...` (or `golangci-lint run ./...` for full lint), then `go build ./...`.
 
 ## Structure
 
