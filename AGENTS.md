@@ -3,20 +3,16 @@
 ## Commands
 
 - The project links `frida-core` via CGO, so Go tooling requires a Frida Core devkit matching the build host. If it is not installed in a standard location, set `CGO_ENABLED=1`, `CGO_CFLAGS="-I/path/to/frida-core-devkit/include"`, and `CGO_LDFLAGS="-L/path/to/frida-core-devkit/lib"`.
-- Use `go vet ./...`, `go build ./...`, `go install .`, and `go run . attach` directly; the CGO environment must be set for each command when the devkit is in a non-standard location.
+- Use `go vet ./...`, `go build ./...`, `go install .`, and `go run .` directly; the CGO environment must be set for each command when the devkit is in a non-standard location.
 - Format changed Go files with `gofmt -w <files>`.
 - `go vet ./...` is the fast verification; `golangci-lint run ./...` is the full lint check (`.golangci.yml` v2).
 - NEVER add test files to this project.
-- On a SIP-enabled macOS host without root, process injection fails with a frida-core timeout ("Timeout was reached"), so end-to-end testing of attach and the evaluator needs privileges; device listing, application/process listing, spawning, and killing work without them.
+- On a SIP-enabled macOS host without root, process injection fails with a frida-core timeout ("Timeout was reached"), so end-to-end testing of the MCP `attach` tool and evaluator needs privileges; device listing, application/process listing, spawning, and killing work without them.
 - Typical post-edit flow: `gofmt -w <files>`, then `go vet ./...` (or `golangci-lint run ./...` for full lint), then `go build ./...`.
 
 ## Structure
 
-- `main.go` owns `CmdRoot`, Viper setup, slog setup, signal-aware execution, and final error logging/exiting. Register commands with `CmdRoot.AddCommand`.
-- Cobra commands in `cmd/` use the command context for work that can block. Do not call `os.Exit` outside `main`.
-- `cmd/attach.go` defines the `attach` command. It connects to a Frida device (`--frida.address` or `--frida.usb`, mutually exclusive), lists applications, attaches to the process given by `--frida.pid` or `--frida.name` (mutually exclusive), creates the persistent JavaScript evaluator, and evaluates and logs JavaScript.
-- `cmd/mcp.go` defines the `mcp` command. It creates a Frida manager, builds an `mcpserver.MCPServer` via `mcpserver.New`, runs it over stdio until the command context is cancelled, and treats `context.Canceled` as a clean shutdown.
-- `cmd/utils.go` holds the shared close helpers (`closeFridaManager`, `closeFridaDevice`, `closeFridaSession`, `closeFridaEvaluator`, `closeMCPServer`); each closes its resource with a 10-second timeout context and logs errors via slog.
+- `main.go` defines `cmdMain`, configures Viper and slog, creates a Frida manager, builds an `mcpserver.MCPServer` via `mcpserver.New`, and runs it over stdio until the command context is cancelled. It treats `context.Canceled` as a clean shutdown, closes resources with 10-second timeout contexts, and owns signal-aware execution and final error logging/exiting. Do not call `os.Exit` outside `main`.
 - `internal/mcpserver/` implements the MCP server with `github.com/modelcontextprotocol/go-sdk/mcp`. `MCPServer` (in `server.go`) holds the `*mcp.Server`, the injected `*frida.Manager`, and mutex-guarded state maps; `New(manager, version)` registers all tools, `Run(ctx)` runs the stdio transport, and `Close(ctx)` closes all scripts, sessions, and devices created through tools. Tool handlers are methods grouped by domain in `devices.go`, `applications.go`, `processes.go`, `sessions.go`, and `scripts.go`. Devices, sessions, and scripts are referenced by opaque UUID handles; handlers synchronize state map access with `mu`.
 - `internal/frida/` is a CGO wrapper over frida-core exposing `Manager`, `Device`, `Session`, `Evaluator`, `Script`, `Process`, and `Application`. It embeds the evaluator script from `assets/evaluator.js`, provides GIO-cancellable helpers in `tools.go`, and performs refcounted library init in `library.go`.
 
@@ -24,8 +20,7 @@
 
 - Viper reads CLI flags, `SUPER_TROUPER_` environment variables, then config files named `config` (for example, `config.yaml`) in `/etc/super-trouper`, `~/.config/super-trouper`, and the working directory. Dots and hyphens become underscores, for example `SUPER_TROUPER_LOGGING_LEVEL`.
 - Logging flags are `logging.level` and `logging.json`.
-- The `attach` command adds `frida.address`, `frida.usb`, `frida.pid`, `frida.name`, and `frida.wait` (environment variables `SUPER_TROUPER_FRIDA_ADDRESS`, `SUPER_TROUPER_FRIDA_USB`, `SUPER_TROUPER_FRIDA_PID`, `SUPER_TROUPER_FRIDA_NAME`, and `SUPER_TROUPER_FRIDA_WAIT`). Address and USB options cannot be used together; exactly one of PID or name must be given. `frida.wait` is a duration and only affects name-based attach.
-- The `mcp` command adds no flags. Devices are connected dynamically through the `device_connect` tool (by device ID, remote address, or type), and tools referencing devices, sessions, or scripts take opaque handles.
+- `cmdMain` adds no MCP-specific flags. Devices are connected dynamically through the `device_connect` tool (by device ID, remote address, or type), and tools referencing devices, sessions, or scripts take opaque handles.
 
 ## Conventions
 

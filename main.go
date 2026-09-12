@@ -10,57 +10,68 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/crissyfield/super-trouper/cmd"
+	"github.com/crissyfield/super-trouper/internal/frida"
+	"github.com/crissyfield/super-trouper/internal/mcpserver"
 )
 
 // Version is the application version, injected at build time via ldflags.
 var Version = "unknown"
 
-// CmdRoot defines the root command.
-var CmdRoot = &cobra.Command{
-	Use:               "super-trouper [flags] [command]",
+// CmdSuperTrouper defines the main command.
+var cmdMain = &cobra.Command{
+	Use:               "super-trouper [flags]",
 	Long:              "MCP server for the Frida reverse engineering toolkit.",
-	Args:              cobra.ArbitraryArgs,
+	Args:              cobra.NoArgs,
 	Version:           Version,
 	SilenceErrors:     true,
 	SilenceUsage:      true,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	PersistentPreRunE: setup,
+	RunE:              runMCP,
 }
 
-// Initialize command options
 func init() {
-	// Logging options
-	CmdRoot.PersistentFlags().String("logging.level", "info", "verbosity of logging output")
-	CmdRoot.PersistentFlags().Bool("logging.json", false, "change logging format to JSON")
-
-	// Register sub-commands
-	CmdRoot.AddCommand(cmd.CmdAttach)
-	CmdRoot.AddCommand(cmd.CmdMcp)
+	// Define command line flags.
+	cmdMain.PersistentFlags().String("logging.level", "info", "verbosity of logging output")
+	cmdMain.PersistentFlags().Bool("logging.json", false, "change logging format to JSON")
 }
 
-// setup will set up configuration management and logging.
+// main is the main entry point of the command.
+func main() {
+	// Create a context that is canceled when an interrupt signal is received.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Execute the main command.
+	if err := cmdMain.ExecuteContext(ctx); err != nil {
+		slog.Error("Unable to execute command", slog.Any("error", err))
+		os.Exit(1)
+	}
+}
+
+// setup configures Viper and slog.
 //
 // Configuration options can be set via the command line, via a configuration file (in the current folder, at
 // "/etc/super-trouper/config.yaml" or at "~/.config/super-trouper/config.yaml"), and via environment variables
 // (all uppercase and prefixed with "SUPER_TROUPER_").
-func setup(cmd *cobra.Command, args []string) error {
-	// Connect all options to Viper
-	err := viper.BindPFlags(cmd.Flags())
+func setup(command *cobra.Command, _ []string) error {
+	// Bind command flags
+	err := viper.BindPFlags(command.Flags())
 	if err != nil {
 		return fmt.Errorf("bind command line flags: %w", err)
 	}
 
-	// Environment variables
+	// Configure environment variables
 	viper.SetEnvPrefix("SUPER_TROUPER")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	viper.AutomaticEnv()
 
-	// Configuration file
+	// Search standard configuration paths
 	viper.SetConfigName("config")
 	viper.AddConfigPath("/etc/super-trouper")
 
@@ -71,13 +82,12 @@ func setup(cmd *cobra.Command, args []string) error {
 	viper.AddConfigPath(".")
 
 	if err := viper.ReadInConfig(); err != nil {
-		// Don't fail if config not found
 		if !errors.As(err, &viper.ConfigFileNotFoundError{}) {
 			return fmt.Errorf("read config file: %w", err)
 		}
 	}
 
-	// Logging
+	// Configure logging
 	var level slog.Level
 
 	err = level.UnmarshalText([]byte(viper.GetString("logging.level")))
@@ -88,10 +98,8 @@ func setup(cmd *cobra.Command, args []string) error {
 	var handler slog.Handler
 
 	if viper.GetBool("logging.json") {
-		// Use JSON handler
 		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	} else {
-		// Use text handler
 		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	}
 
@@ -101,13 +109,44 @@ func setup(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// main is the main entry point of the command.
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := CmdRoot.ExecuteContext(ctx); err != nil {
-		slog.Error("Unable to execute command", slog.Any("error", err))
-		os.Exit(1)
+// runMCP runs the MCP server.
+func runMCP(command *cobra.Command, _ []string) error {
+	// Create Frida manager
+	manager, err := frida.NewManager(frida.WithManagerLogger(slog.Default()))
+	if err != nil {
+		return fmt.Errorf("create Frida manager: %w", err)
 	}
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := manager.Close(ctx); err != nil {
+			slog.Error("Close Frida manager", slog.Any("error", err))
+		}
+	}()
+
+	// Create MCP server
+	server := mcpserver.New(manager, command.Version)
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := server.Close(ctx); err != nil {
+			slog.Error("Close MCP server", slog.Any("error", err))
+		}
+	}()
+
+	// Run MCP server
+	slog.Info("Starting MCP server")
+
+	err = server.Run(command.Context())
+	if (err != nil) && (!errors.Is(err, context.Canceled)) {
+		return fmt.Errorf("run MCP server: %w", err)
+	}
+
+	slog.Info("Stropping MCP server")
+
+	return nil
 }

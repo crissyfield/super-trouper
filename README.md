@@ -3,16 +3,14 @@
 </p>
 
 
-# super-trouper
+# Super Trouper
 
-`super-trouper` is an MCP server for the [Frida](https://frida.re/) reverse engineering toolkit.
+An MCP server for the [Frida](https://frida.re/) reverse engineering toolkit.
 
-
-## Status
-
-The `attach` command keeps a Frida device manager for its lifetime and connects by address or to a USB device.
-The `mcp` command runs an MCP server over stdio that exposes the Frida bindings as tools. Device connections,
-sessions, and scripts are managed through the tools themselves and referenced by handles.
+**Super Trouper** runs an MCP server over `STDIO` that exposes Frida capabilities as tools for coding agents. It
+can connect to local, USB, and remote devices; inspect applications and processes; manage process sessions; and
+load, evaluate, and exchange messages with JavaScript instrumentation scripts. Device connections, sessions, and
+scripts are managed through the tools themselves and referenced by opaque handles.
 
 
 ## Install
@@ -28,14 +26,14 @@ brew install --cask crissyfield/tap/super-trouper
 
 ### Release Binary
 
-Download a binary for your architecture and OS from the [Releases
+Download a binary for your platform from the [Releases
 page](https://github.com/crissyfield/super-trouper/releases).
 
 
 ### From Source
 
 Install a [Frida Core DevKit](https://github.com/frida/frida/releases) matching your build host first. Then
-build and install `super-trouper` with the following commands:
+build and install **Super Trouper** with the following commands:
 
 ```sh
 # Set flags if the Frida devkit is not in a standard location
@@ -58,14 +56,13 @@ the example below, but configuration is similar in [Codex](https://developers.op
 
 ### Using the Binary
 
-The `super-trouper` binary has to be in your `PATH` for the agent to find it.
+If the **Super Trouper** binary is not in your `PATH`, specify the full path in your MCP server configuration.
 
 ```json
 {
   "mcpServers": {
     "super-trouper": {
-      "command": "super-trouper",
-      "args": ["mcp"]
+      "command": "super-trouper"
     }
   }
 }
@@ -74,14 +71,14 @@ The `super-trouper` binary has to be in your `PATH` for the agent to find it.
 
 ### Using Docker
 
-Docker is a convenient way to run `super-trouper` without installing it on your host.
+Docker is a convenient way to run **Super Trouper** without installing it on your host.
 
 ```json
 {
   "mcpServers": {
     "super-trouper": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "ghcr.io/crissyfield/super-trouper", "--", "mcp"]
+      "args": ["run", "-i", "--rm", "ghcr.io/crissyfield/super-trouper"]
     }
   }
 }

@@ -14,6 +14,3 @@ USER super-trouper
 
 # Always execute the release binary
 ENTRYPOINT ["/usr/local/bin/super-trouper"]
-
-# Start the MCP server unless command arguments override it
-CMD ["mcp"]
