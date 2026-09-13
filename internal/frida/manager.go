@@ -22,13 +22,16 @@ import (
 // errManagerClosed indicates that the manager is already closed.
 var errManagerClosed = errors.New("manager already closed")
 
-// Manager owns a native Frida device manager.
+// Manager owns native Frida managers and compiler resources.
 type Manager struct {
-	mu      sync.Mutex            // Guards manager state.
-	closed  bool                  // Whether native resources were released.
-	logger  *slog.Logger          // Logger for library events.
-	manager *C.FridaDeviceManager // Native Frida device manager.
-	devices map[*Device]struct{}  // Active devices created by this manager.
+	mu       sync.Mutex             // Guards manager state.
+	closed   bool                   // Whether native resources were released.
+	logger   *slog.Logger           // Logger for library events.
+	manager  *C.FridaDeviceManager  // Native Frida device manager.
+	devices  map[*Device]struct{}   // Active devices created by this manager.
+	buildMu  sync.Mutex             // Serializes package installation and compilation.
+	packages *C.FridaPackageManager // Native Frida package manager.
+	compiler *C.FridaCompiler       // Native Frida compiler.
 }
 
 // ManagerOption configures a Frida manager.
@@ -39,7 +42,7 @@ func WithManagerLogger(logger *slog.Logger) ManagerOption {
 	return func(m *Manager) { m.logger = logger }
 }
 
-// NewManager initializes a Frida device manager.
+// NewManager initializes Frida manager and compiler resources.
 func NewManager(options ...ManagerOption) (*Manager, error) {
 	// Create manager instance with defaults
 	m := &Manager{
@@ -67,8 +70,29 @@ func NewManager(options ...ManagerOption) (*Manager, error) {
 		return nil, errors.New("create Frida device manager")
 	}
 
-	// Assign native device manager
+	// Create package manager
+	packages := C.frida_package_manager_new()
+	if packages == nil {
+		C.frida_unref(C.gpointer(unsafe.Pointer(manager)))
+		releaseLibrary()
+
+		return nil, errors.New("create Frida package manager")
+	}
+
+	// Create compiler
+	compiler := C.frida_compiler_new(manager)
+	if compiler == nil {
+		C.frida_unref(C.gpointer(unsafe.Pointer(packages)))
+		C.frida_unref(C.gpointer(unsafe.Pointer(manager)))
+		releaseLibrary()
+
+		return nil, errors.New("create Frida compiler")
+	}
+
+	// Assign native resources
 	m.manager = manager
+	m.packages = packages
+	m.compiler = compiler
 
 	// Return manager instance
 	return m, nil
@@ -76,6 +100,10 @@ func NewManager(options ...ManagerOption) (*Manager, error) {
 
 // Close releases the Frida device manager; active devices are not closed.
 func (m *Manager) Close(ctx context.Context) error {
+	// Wait for package installation / compilation to finish first
+	m.buildMu.Lock()
+	defer m.buildMu.Unlock()
+
 	// Synchronize access
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -108,6 +136,12 @@ func (m *Manager) Close(ctx context.Context) error {
 
 	// Clean up
 	releaseCancellable()
+
+	C.frida_unref(C.gpointer(unsafe.Pointer(m.compiler)))
+	m.compiler = nil
+
+	C.frida_unref(C.gpointer(unsafe.Pointer(m.packages)))
+	m.packages = nil
 
 	C.frida_unref(C.gpointer(unsafe.Pointer(m.manager)))
 	m.manager = nil
