@@ -12,6 +12,7 @@ can connect to local, USB, and remote devices; inspect applications and processe
 load, evaluate, and exchange messages with JavaScript instrumentation scripts. Device connections, sessions, and
 scripts are managed through the tools themselves and referenced by opaque handles.
 
+<img width="1512" height="950" alt="super-trouper" src="https://github.com/user-attachments/assets/691b56a6-dc9d-46e3-b104-92f4f5d53a3c" />
 
 ## Install
 
