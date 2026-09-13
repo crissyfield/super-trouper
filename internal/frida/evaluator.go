@@ -62,7 +62,7 @@ func NewEvaluator(ctx context.Context, session *Session) (*Evaluator, error) {
 		return nil, fmt.Errorf("create evaluator script: %w", err)
 	}
 
-	// Return evaluator instance
+	// Return Evaluator instance
 	return &Evaluator{script: script}, nil
 }
 

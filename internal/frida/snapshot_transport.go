@@ -24,9 +24,11 @@ func snapshotTransportToFrida(transport SnapshotTransport) (C.FridaSnapshotTrans
 	case SnapshotTransportInline:
 		// Frida's default transport
 		return C.FRIDA_SNAPSHOT_TRANSPORT_INLINE, true
+
 	case SnapshotTransportSharedMemory:
 		// Shared memory transport
 		return C.FRIDA_SNAPSHOT_TRANSPORT_SHARED_MEMORY, true
+
 	default:
 		// Invalid transport
 		return 0, false

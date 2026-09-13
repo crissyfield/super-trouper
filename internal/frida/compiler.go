@@ -1,162 +1,96 @@
 package frida
 
-import (
-	"context"
-	"errors"
-	"fmt"
-	"slices"
-	"unsafe"
-)
-
 /*
 #include <stdlib.h>
 #include <frida-core.h>
 */
 import "C"
 
-// Package identifies a package installed by Frida's package manager.
-type Package struct {
-	Name    string
-	Version string
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"unsafe"
+)
+
+// errCompilerClosed indicates that the compiler is already closed.
+var errCompilerClosed = errors.New("compiler already closed")
+
+// Compiler bundles scripts using Frida's compiler.
+type Compiler struct {
+	mu     sync.Mutex       // Guards compiler state.
+	closed bool             // Whether native resources were released.
+	logger *slog.Logger     // Logger for library events.
+	handle *C.FridaCompiler // Native Frida compiler.
 }
 
-// InstallOption configures a package installation.
-type InstallOption func(*installOptions)
+// CompileOption configures a compiler build.
+type CompileOption func(*compileOptions)
 
-// installOptions holds the options for a Manager.InstallPackages call.
-type installOptions struct {
-	specs []string // Package specs to install.
+// compileOptions holds the options for a Compiler.Compile call.
+type compileOptions struct {
+	projectRoot string // Project root, empty for Frida's inferred default.
 }
 
-// WithInstallSpec adds a package spec to install.
-func WithInstallSpec(spec string) InstallOption {
-	return func(options *installOptions) { options.specs = append(options.specs, spec) }
+// WithCompilerProjectRoot sets the project root for a buikd. Current directory is used if not set.
+// absolute, or the current working directory otherwise.
+func WithCompileProjectRoot(path string) CompileOption {
+	return func(options *compileOptions) { options.projectRoot = path }
 }
 
-// InstallPackages installs package specs into the given Frida project.
-func (m *Manager) InstallPackages(ctx context.Context, projectRoot string, opts ...InstallOption) ([]Package, error) {
-	// Validate input
-	if projectRoot == "" {
-		return nil, errors.New("project root required")
+// newCompiler creates a compiler from the given Frida device manager.
+func newCompiler(manager *C.FridaDeviceManager, logger *slog.Logger) (*Compiler, error) {
+	// Create compiler
+	handle := C.frida_compiler_new(manager)
+	if handle == nil {
+		return nil, errors.New("create compiler")
 	}
 
+	// Return Compiler instance
+	return &Compiler{logger: logger, handle: handle}, nil
+}
+
+// close releases native compiler resources.
+func (c *Compiler) close() {
+	// Synchronize access
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Early exit if already closed
+	if c.closed {
+		return
+	}
+
+	c.closed = true
+
+	// Clean up
+	C.frida_unref(C.gpointer(unsafe.Pointer(c.handle)))
+	c.handle = nil
+}
+
+// Compile bundles an entrypoint into an IIFE script.
+func (c *Compiler) Compile(ctx context.Context, entrypoint string, opts ...CompileOption) (string, error) {
 	// Assemble options
-	var config installOptions
+	var config compileOptions
 
 	for _, opt := range opts {
 		opt(&config)
 	}
 
-	specs := config.specs
-	if len(specs) == 0 {
-		return nil, nil
-	}
-
-	if slices.Contains(specs, "") {
-		return nil, errors.New("package spec required")
-	}
-
-	// Serialize builds
-	m.buildMu.Lock()
-	defer m.buildMu.Unlock()
-
-	m.mu.Lock()
-	closed := m.closed
-	packages := m.packages
-	m.mu.Unlock()
-
-	if closed {
-		return nil, errManagerClosed
-	}
-
-	// Create installation options
-	options := C.frida_package_install_options_new()
-	defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
-
-	cProjectRoot := C.CString(projectRoot)
-	defer C.free(unsafe.Pointer(cProjectRoot))
-
-	C.frida_package_install_options_set_project_root(options, cProjectRoot)
-	C.frida_package_install_options_set_role(options, C.FRIDA_PACKAGE_ROLE_RUNTIME)
-
-	for _, spec := range specs {
-		cspec := C.CString(spec)
-		C.frida_package_install_options_add_spec(options, cspec)
-		C.free(unsafe.Pointer(cspec))
-	}
-
-	// Create cancellable
-	cancellable, releaseCancellable := newCancellable(ctx)
-	defer releaseCancellable()
-
-	// Install packages
-	var gErr *C.GError
-
-	result := C.frida_package_manager_install_sync(
-		packages,
-		options,
-		cancellable,
-		&gErr,
-	)
-
-	if err := consumeGError(gErr); err != nil {
-		return nil, fmt.Errorf("install packages: %w", err)
-	}
-
-	if result == nil {
-		return nil, errors.New("install packages: empty")
-	}
-
-	defer C.frida_unref(C.gpointer(unsafe.Pointer(result)))
-
-	// Collect packages changed by this installation.
-	list := C.frida_package_install_result_get_packages(result)
-	if list == nil {
-		return nil, nil
-	}
-
-	count := int(C.frida_package_list_size(list))
-	installed := make([]Package, 0, count)
-
-	for i := range count {
-		// Get package from list
-		item := C.frida_package_list_get(list, C.gint(i))
-		if item == nil {
-			continue
-		}
-
-		// Append package to list
-		installed = append(installed, Package{
-			Name:    C.GoString(C.frida_package_get_name(item)),
-			Version: C.GoString(C.frida_package_get_version(item)),
-		})
-	}
-
-	return installed, nil
-}
-
-// Compile bundles the entrypoint in the given Frida project into an IIFE script.
-func (m *Manager) Compile(ctx context.Context, path string, entrypoint string) (string, error) {
 	// Validate input
-	if path == "" {
-		return "", errors.New("project root required")
-	}
-
 	if entrypoint == "" {
 		return "", errors.New("entrypoint required")
 	}
 
-	// Serialize builds and protect native resources from shutdown.
-	m.buildMu.Lock()
-	defer m.buildMu.Unlock()
+	// Synchronize access
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	m.mu.Lock()
-	closed := m.closed
-	compiler := m.compiler
-	m.mu.Unlock()
-
-	if closed {
-		return "", errManagerClosed
+	// Check if compiler is already closed
+	if c.closed {
+		return "", errCompilerClosed
 	}
 
 	// Assemble options
@@ -167,17 +101,21 @@ func (m *Manager) Compile(ctx context.Context, path string, entrypoint string) (
 
 	defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
 
-	cProjectRoot := C.CString(path)
-	defer C.free(unsafe.Pointer(cProjectRoot))
-
 	compilerOptions := (*C.FridaCompilerOptions)(unsafe.Pointer(options))
-	C.frida_compiler_options_set_project_root(compilerOptions, cProjectRoot)
 	C.frida_compiler_options_set_output_format(compilerOptions, C.FRIDA_OUTPUT_FORMAT_UNESCAPED)
 	C.frida_compiler_options_set_bundle_format(compilerOptions, C.FRIDA_BUNDLE_FORMAT_IIFE)
 	C.frida_compiler_options_set_type_check(compilerOptions, C.FRIDA_TYPE_CHECK_MODE_NONE)
 	C.frida_compiler_options_set_source_maps(compilerOptions, C.FRIDA_SOURCE_MAPS_OMITTED)
 	C.frida_compiler_options_set_compression(compilerOptions, C.FRIDA_JS_COMPRESSION_NONE)
 	C.frida_compiler_options_set_platform(compilerOptions, C.FRIDA_JS_PLATFORM_GUM)
+
+	if config.projectRoot != "" {
+		// Set project root
+		cProjectRoot := C.CString(config.projectRoot)
+		defer C.free(unsafe.Pointer(cProjectRoot))
+
+		C.frida_compiler_options_set_project_root(compilerOptions, cProjectRoot)
+	}
 
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
@@ -186,12 +124,12 @@ func (m *Manager) Compile(ctx context.Context, path string, entrypoint string) (
 	// Compile entrypoint
 	var gErr *C.GError
 
-	centrypoint := C.CString(entrypoint)
-	defer C.free(unsafe.Pointer(centrypoint))
+	cEntrypoint := C.CString(entrypoint)
+	defer C.free(unsafe.Pointer(cEntrypoint))
 
 	bundle := C.frida_compiler_build_sync(
-		compiler,
-		centrypoint,
+		c.handle,
+		cEntrypoint,
 		options,
 		cancellable,
 		&gErr,

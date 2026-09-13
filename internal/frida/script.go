@@ -90,6 +90,7 @@ func newScript(session *Session, handle *C.FridaScript) (*Script, error) {
 		return nil, fmt.Errorf("failed to connect message handler [pid=%d]", session.pid)
 	}
 
+	// Return Script instance
 	return script, nil
 }
 
