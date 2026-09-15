@@ -10,9 +10,9 @@ import (
 	"sync"
 )
 
-// evaluatorScript is the JavaScript source of the persistent evaluator.
+// evaluatorScript is the source of the persistent evaluator.
 //
-//go:embed assets/evaluator.js
+//go:embed assets/evaluator.ts
 var evaluatorScript string
 
 // errEvaluatorClosed indicates that the evaluator was closed.
@@ -54,10 +54,17 @@ type Evaluator struct {
 	requestID uint64     // Eval request ID.
 }
 
-// NewEvaluator creates a persistent JavaScript evaluator in the given session.
-func NewEvaluator(ctx context.Context, session *Session) (*Evaluator, error) {
+// NewEvaluator creates a persistent JavaScript evaluator in the given session. The given packages are installed
+// and ready to be used in the eval statements.
+func (m *Manager) NewEvaluator(ctx context.Context, session *Session, packages []PackageInfo) (*Evaluator, error) {
+	// Build evaluator bundle from the embedded evaluator protocol source
+	bundle, err := m.BuildScript(ctx, evaluatorScript, packages)
+	if err != nil {
+		return nil, fmt.Errorf("build evaluator: %w", err)
+	}
+
 	// Create evaluator script
-	script, err := session.CreateAndLoadScript(ctx, evaluatorScript)
+	script, err := session.CreateAndLoadScript(ctx, bundle)
 	if err != nil {
 		return nil, fmt.Errorf("create evaluator script: %w", err)
 	}

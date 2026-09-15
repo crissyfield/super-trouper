@@ -208,7 +208,7 @@ func (s *MCPServer) evaluate(ctx context.Context, _ *mcp.CallToolRequest, in eva
 	evaluator := state.evaluator
 
 	if evaluator == nil {
-		evaluator, err = frida.NewEvaluator(ctx, state.session)
+		evaluator, err = s.manager.NewEvaluator(ctx, state.session, allBridgePackages())
 		if err != nil {
 			return nil, nil, fmt.Errorf("create evaluator: %w", err)
 		}

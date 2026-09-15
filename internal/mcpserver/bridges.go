@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/crissyfield/super-trouper/internal/frida"
 )
@@ -28,8 +30,8 @@ var supportedBridges = map[string]bridgeEntry{
 	},
 }
 
-// validateBridges validates the given bridge names, rejecting duplicates and unknown names, and returns the package
-// information of the selected bridges in input order.
+// validateBridges validates the given bridge names, rejecting duplicates and unknown names, and returns the
+// package information of the selected bridges in input order.
 func validateBridges(names []string) ([]frida.PackageInfo, error) {
 	// Collect duplicates and package infos
 	duplicates := make(map[string]bool, len(names))
@@ -53,4 +55,16 @@ func validateBridges(names []string) ([]frida.PackageInfo, error) {
 	}
 
 	return packageInfos, nil
+}
+
+// allBridgePackages returns the package information of all supported bridges in sorted order.
+func allBridgePackages() []frida.PackageInfo {
+	// Collect package infos
+	packageInfos := make([]frida.PackageInfo, 0, len(supportedBridges))
+
+	for _, name := range slices.Sorted(maps.Keys(supportedBridges)) {
+		packageInfos = append(packageInfos, supportedBridges[name].packageInfo)
+	}
+
+	return packageInfos
 }
