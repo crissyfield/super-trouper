@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 	"uuid"
 
@@ -35,7 +37,7 @@ func (s *MCPServer) addScriptsTools() {
 	// Create a script
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name: "script_create",
-		Description: "Creates a Frida script with the given JavaScript source in an attached session. The " +
+		Description: "Creates a Frida script with the given TypeScript source in an attached session. The " +
 			"script is created in an unloaded state; use script_load to load it.",
 	}, s.scriptCreate)
 
@@ -69,6 +71,13 @@ func (s *MCPServer) addScriptsTools() {
 		Description: "Returns the messages sent by a Frida script. Messages are buffered (up to 256) and " +
 			"should be drained regularly.",
 	}, s.scriptMessages)
+
+	// List supported bridges
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name: "script_bridge_list",
+		Description: "Returns the language bridges that can be exposed as globals in scripts created with " +
+			"script_create.",
+	}, s.scriptBridgeList)
 }
 
 // closeFridaScripts closes the given Frida scripts with a timeout context and logs any error.
@@ -87,10 +96,11 @@ func closeFridaScripts(scripts ...*frida.Script) {
 
 // scriptCreateInput contains the input arguments of the 'script_create' tool.
 type scriptCreateInput struct {
-	Session string `json:"session" jsonschema:"handle of the session to create the script in"`
-	Source  string `json:"source" jsonschema:"JavaScript source of the script"`
-	Name    string `json:"name,omitempty" jsonschema:"name of the script"`
-	Runtime string `json:"runtime,omitempty" jsonschema:"JavaScript runtime to run the script in, either default, qjs, or v8"`
+	Session string   `json:"session" jsonschema:"handle of the session to create the script in"`
+	Source  string   `json:"source" jsonschema:"JavaScript or TypeScript source of the script"`
+	Name    string   `json:"name,omitempty" jsonschema:"name of the script"`
+	Runtime string   `json:"runtime,omitempty" jsonschema:"JavaScript runtime to run the script in, either default, qjs, or v8"`
+	Bridges []string `json:"bridges,omitempty" jsonschema:"language bridges to expose as globals, use 'script_bridge_list' to get full list"`
 }
 
 // scriptCreateOutput contains the output of the 'script_create' tool.
@@ -105,12 +115,8 @@ func (s *MCPServer) scriptCreate(ctx context.Context, _ *mcp.CallToolRequest, in
 		return nil, scriptCreateOutput{}, fmt.Errorf("invalid runtime [runtime=%s]", in.Runtime)
 	}
 
-	// Synchronize access
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Look up session
-	state, err := s.lookupSessionState(in.Session)
+	// Validate bridges
+	packageInfos, err := validateBridges(in.Bridges)
 	if err != nil {
 		return nil, scriptCreateOutput{}, err
 	}
@@ -126,8 +132,24 @@ func (s *MCPServer) scriptCreate(ctx context.Context, _ *mcp.CallToolRequest, in
 		options = append(options, frida.WithScriptRuntime(frida.ScriptRuntime(in.Runtime)))
 	}
 
-	// Create script
-	script, err := state.session.CreateScript(ctx, in.Source, options...)
+	// Build the script
+	source, err := s.manager.BuildScript(ctx, in.Source, packageInfos)
+	if err != nil {
+		return nil, scriptCreateOutput{}, fmt.Errorf("build script bundle: %w", err)
+	}
+
+	// Synchronize access
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Look up session
+	state, err := s.lookupSessionState(in.Session)
+	if err != nil {
+		return nil, scriptCreateOutput{}, err
+	}
+
+	// Create script from the bundle
+	script, err := state.session.CreateScript(ctx, source, options...)
 	if err != nil {
 		return nil, scriptCreateOutput{}, fmt.Errorf("create script: %w", err)
 	}
@@ -329,4 +351,37 @@ func decodeMessage(message frida.ScriptMessage) any {
 	}
 
 	return value
+}
+
+// scriptBridgeListInput contains the input arguments of the 'script_bridge_list' tool.
+type scriptBridgeListInput struct{}
+
+// scriptBridgeListEntry describes a single supported bridge.
+type scriptBridgeListEntry struct {
+	Name        string `json:"name" jsonschema:"bridge name for the bridges input of script_create"`
+	Export      string `json:"export" jsonschema:"name of the globalThis binding exposed by the bridge"`
+	Description string `json:"description" jsonschema:"description of the bridge"`
+}
+
+// scriptBridgeListOutput contains the output of the 'script_bridge_list' tool.
+type scriptBridgeListOutput struct {
+	Bridges []scriptBridgeListEntry `json:"bridges" jsonschema:"supported bridges"`
+}
+
+// scriptBridgeList implements the 'script_bridge_list' tool.
+func (*MCPServer) scriptBridgeList(_ context.Context, _ *mcp.CallToolRequest, _ scriptBridgeListInput) (*mcp.CallToolResult, scriptBridgeListOutput, error) {
+	// Collect bridge entries in sorted order
+	entries := make([]scriptBridgeListEntry, 0, len(supportedBridges))
+
+	for _, name := range slices.Sorted(maps.Keys(supportedBridges)) {
+		entry := supportedBridges[name]
+
+		entries = append(entries, scriptBridgeListEntry{
+			Name:        name,
+			Export:      entry.packageInfo.Export,
+			Description: entry.description,
+		})
+	}
+
+	return nil, scriptBridgeListOutput{Bridges: entries}, nil
 }
