@@ -14,6 +14,16 @@ scripts are managed through the tools themselves and referenced by opaque handle
 
 <img width="1512" height="950" alt="super-trouper" src="https://github.com/user-attachments/assets/691b56a6-dc9d-46e3-b104-92f4f5d53a3c" />
 
+
+## Features
+
+- **Single Go binary** — no Python, Node, or Frida CLI tooling required on your host
+- **Powered by Frida 17.x** — statically linked against Frida Core DevKit v17.18.0
+- **Full device support** — list and connect to local, USB, and remote devices, attach to apps and processes
+- **TypeScript and JavaScript instrumentation** — create and load Frida scripts, evaluate directly in a target
+- **Runs anywhere** — prebuilt binaries for macOS and Linux, a Docker image, and a Homebrew cask
+
+
 ## Install
 
 ### Homebrew
