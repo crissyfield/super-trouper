@@ -5,6 +5,7 @@
   "license": "MIT",
   "author": "Crissy Field GmbH",
   "homepage": "https://github.com/crissyfield/super-trouper",
+  "mcpName": "io.github.crissyfield/super-trouper",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/crissyfield/super-trouper.git"

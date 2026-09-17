@@ -96,6 +96,7 @@ for platform in "${platforms[@]}"; do
   "description": "MCP server for the Frida reverse engineering toolkit.",
   "license": "MIT",
   "author": "Crissy Field GmbH",
+  "mcpName": "io.github.crissyfield/super-trouper",
   "homepage": "https://github.com/crissyfield/super-trouper",
   "repository": {
     "type": "git",
