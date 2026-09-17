@@ -38,8 +38,8 @@ var cmdMain = &cobra.Command{
 
 func init() {
 	// Define command line flags.
-	cmdMain.PersistentFlags().String("logging.level", "info", "verbosity of logging output")
-	cmdMain.PersistentFlags().Bool("logging.json", false, "change logging format to JSON")
+	cmdMain.PersistentFlags().StringP("log-level", "l", "info", "verbosity of logging output")
+	cmdMain.PersistentFlags().BoolP("log-as-json", "j", false, "change logging format to JSON")
 }
 
 // main is the main entry point of the command.
@@ -91,14 +91,14 @@ func setup(command *cobra.Command, _ []string) error {
 	// Configure logging
 	var level slog.Level
 
-	err = level.UnmarshalText([]byte(viper.GetString("logging.level")))
+	err = level.UnmarshalText([]byte(viper.GetString("log-level")))
 	if err != nil {
 		return fmt.Errorf("parse log level: %w", err)
 	}
 
 	var handler slog.Handler
 
-	if viper.GetBool("logging.json") {
+	if viper.GetBool("log-as-json") {
 		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	} else {
 		handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
