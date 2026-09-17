@@ -21,7 +21,7 @@ scripts are managed through the tools themselves and referenced by opaque handle
 - **Powered by Frida 17.x** — statically linked against Frida Core DevKit v17.18.0
 - **Full device support** — list and connect to local, USB, and remote devices, attach to apps and processes
 - **TypeScript and JavaScript instrumentation** — create and load Frida scripts, evaluate directly in a target
-- **Runs anywhere** — prebuilt binaries for macOS and Linux, a Docker image, and a Homebrew cask
+- **Runs anywhere** — prebuilt binaries for macOS and Linux, install via Docker, Homebrew, or npm
 
 
 ## Install
@@ -32,6 +32,15 @@ Install the macOS release through the project’s Homebrew tap:
 
 ```sh
 brew install --cask crissyfield/tap/super-trouper
+```
+
+
+### npm
+
+Install the launcher package through npm. It pulls in the platform-specific binary via optional dependencies:
+
+```sh
+npm install -g @crissyfield/super-trouper
 ```
 
 
@@ -74,6 +83,22 @@ If the **Super Trouper** binary is not in your `PATH`, specify the full path in 
   "mcpServers": {
     "super-trouper": {
       "command": "super-trouper"
+    }
+  }
+}
+```
+
+
+### Using npx
+
+npm users can run **Super Trouper** directly through `npx` without a global installation:
+
+```json
+{
+  "mcpServers": {
+    "super-trouper": {
+      "command": "npx",
+      "args": ["-y", "@crissyfield/super-trouper"]
     }
   }
 }

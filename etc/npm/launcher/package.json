@@ -1,0 +1,43 @@
+{
+  "name": "@crissyfield/super-trouper",
+  "version": "0.0.0",
+  "description": "MCP server for the Frida reverse engineering toolkit.",
+  "license": "MIT",
+  "author": "Crissy Field GmbH",
+  "homepage": "https://github.com/crissyfield/super-trouper",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/crissyfield/super-trouper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/crissyfield/super-trouper/issues"
+  },
+  "keywords": [
+    "application-security",
+    "frida",
+    "ios-security",
+    "mcp",
+    "mobile-security",
+    "model-context-protocol",
+    "pentesting",
+    "reverse-engineering"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "super-trouper": "bin/super-trouper.cjs"
+  },
+  "files": [
+    "bin/"
+  ],
+  "optionalDependencies": {
+    "@crissyfield/super-trouper-darwin-x64": "0.0.0",
+    "@crissyfield/super-trouper-darwin-arm64": "0.0.0",
+    "@crissyfield/super-trouper-linux-x64-gnu": "0.0.0",
+    "@crissyfield/super-trouper-linux-x64-musl": "0.0.0",
+    "@crissyfield/super-trouper-linux-arm64-gnu": "0.0.0",
+    "@crissyfield/super-trouper-linux-arm64-musl": "0.0.0",
+    "@crissyfield/super-trouper-linux-ia32": "0.0.0"
+  }
+}

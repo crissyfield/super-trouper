@@ -53,7 +53,7 @@ jobs:
           if-no-files-found: error
 
   # Everything else is built and released via GoReleaser in a cross-compilation container
-  build-everything-else-and-release:
+  build-other-and-release:
     runs-on: ubuntu-24.04
     needs: build-macos-arm64-only
 
@@ -191,3 +191,36 @@ jobs:
           git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C homebrew-tap commit -m "Update super-trouper to ${GITHUB_REF_NAME}"
           git -C homebrew-tap push
+
+  # Publish on NPM
+  publish-npm:
+    runs-on: ubuntu-24.04
+    needs: build-other-and-release
+    permissions:
+      contents: read  # Download release assets
+      id-token: write # Trusted publishing exchanges an OIDC token
+
+    steps:
+      # Checkout source code
+      - uses: actions/checkout@v7
+
+      # Install Node.js for the npm CLI
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # Download all release archives and checksum manifest
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets="${RUNNER_TEMP}/super-trouper-npm-assets"
+          mkdir -p "${assets}"
+          gh release download "${GITHUB_REF_NAME}" --dir "${assets}" --pattern "super-trouper-*.tar.xz" --pattern "checksums.txt"
+          test -f "${assets}/checksums.txt"
+
+      # Publish on NPM
+      - name: Publish npm packages
+        run: ./etc/npm/publish.sh "${GITHUB_REF_NAME#v}" "${RUNNER_TEMP}/super-trouper-npm-assets"
