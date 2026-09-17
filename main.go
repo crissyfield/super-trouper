@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
+	"github.com/crissyfield/super-trouper/internal/codeshare"
 	"github.com/crissyfield/super-trouper/internal/frida"
 	"github.com/crissyfield/super-trouper/internal/mcpserver"
 )
@@ -126,8 +127,11 @@ func runMCP(command *cobra.Command, _ []string) error {
 		}
 	}()
 
+	// Create CodeShare client
+	codeshare := codeshare.New()
+
 	// Create MCP server
-	server := mcpserver.New(manager, command.Version)
+	server := mcpserver.New(manager, codeshare, command.Version)
 
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -146,7 +150,7 @@ func runMCP(command *cobra.Command, _ []string) error {
 		return fmt.Errorf("run MCP server: %w", err)
 	}
 
-	slog.Info("Stropping MCP server")
+	slog.Info("Stopping MCP server")
 
 	return nil
 }
