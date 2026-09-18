@@ -53,7 +53,7 @@ jobs:
           if-no-files-found: error
 
   # Everything else is built and released via GoReleaser in a cross-compilation container
-  build-other-and-release:
+  build-with-goreleaser:
     runs-on: ubuntu-24.04
     needs: build-macos-arm64-only
 
@@ -195,7 +195,7 @@ jobs:
   # Publish on NPM
   publish-npm:
     runs-on: ubuntu-24.04
-    needs: build-other-and-release
+    needs: build-with-goreleaser
     permissions:
       contents: read  # Download release assets
       id-token: write # Trusted publishing exchanges an OIDC token
@@ -224,3 +224,42 @@ jobs:
       # Publish on NPM
       - name: Publish npm packages
         run: ./etc/npm/publish.sh "${GITHUB_REF_NAME#v}" "${RUNNER_TEMP}/super-trouper-npm-assets"
+
+  # Publish to the MCP Registry
+  publish-mcp:
+    runs-on: ubuntu-24.04
+    needs: publish-npm
+    permissions:
+      contents: read  # Checkout source code
+      id-token: write # OIDC authentication to the MCP Registry
+
+    steps:
+      # Checkout source code
+      - uses: actions/checkout@v7
+
+      # Install the MCP Registry publisher CLI
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          publisher="${RUNNER_TEMP}/mcp-publisher"
+          curl --fail --location --retry 3 --show-error "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar --extract --gzip --file - --directory "${RUNNER_TEMP}" mcp-publisher
+          "${publisher}" --version
+
+      # The MCP Registry requires a unique version per publication matching the npm package
+      - name: Set version in MCP server.json
+        run: |
+          set -euo pipefail
+          server_json="etc/mcp-registry/server.json"
+          jq --arg version "${GITHUB_REF_NAME#v}" '.version = $version | .packages[0].version = $version' "${server_json}" > "${RUNNER_TEMP}/server.json"
+          mv "${RUNNER_TEMP}/server.json" "${server_json}"
+          jq --exit-status --arg version "${GITHUB_REF_NAME#v}" --arg server "io.github.${GITHUB_REPOSITORY_OWNER}/super-trouper" '.version == $version and .packages[0].version == $version and .name == $server' "${server_json}" >/dev/null
+
+      # Authenticate via the repository's OIDC token; the io.github.<owner>/ namespace matches
+      - name: Authenticate to MCP Registry
+        run: |
+          "${RUNNER_TEMP}/mcp-publisher" login github-oidc
+
+      # Publish server metadata to the MCP Registry
+      - name: Publish to MCP Registry
+        run: |
+          "${RUNNER_TEMP}/mcp-publisher" publish etc/mcp-registry/server.json
