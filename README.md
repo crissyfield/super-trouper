@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="etc/images/logo.png" width="320" alt="super-trouper logo">
+  <img src="https://crissyfield.github.io/assets/super-trouper-logo.png" width="320" alt="super-trouper logo">
 </p>
 
 
@@ -14,7 +14,7 @@ CodeShare](https://codeshare.frida.re) to discover community scripts and fetch t
 tools. Device connections, sessions, and scripts are managed through the tools themselves and referenced by
 opaque handles.
 
-<img width="1512" height="950" alt="super-trouper" src="https://github.com/user-attachments/assets/691b56a6-dc9d-46e3-b104-92f4f5d53a3c" />
+<img width="1512" height="950" alt="super-trouper" src="https://crissyfield.github.io/assets/super-trouper-demo.webp" />
 
 
 ## Features
