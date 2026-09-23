@@ -93,15 +93,16 @@ func (e *Evaluator) Close(ctx context.Context) error {
 	return err
 }
 
-// Evaluate runs statement in the evaluator and returns its JSON result.
-func (e *Evaluator) Evaluate(ctx context.Context, statement string) (json.RawMessage, error) {
+// Evaluate runs statement in the evaluator and returns its JSON result decoded into T.
+func (e *Evaluator) Evaluate[T any](ctx context.Context, statement string) (T, error) {
 	// Synchronize access
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	// Early exit if evaluator is already closed
 	if e.closed {
-		return nil, errEvaluatorClosed
+		var zero T
+		return zero, errEvaluatorClosed
 	}
 
 	// Encode request
@@ -116,12 +117,14 @@ func (e *Evaluator) Evaluate(ctx context.Context, statement string) (json.RawMes
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("encode request: %w", err)
+		var zero T
+		return zero, fmt.Errorf("encode request: %w", err)
 	}
 
 	// Post request to script
 	if err := e.script.Post(string(encoded), nil); err != nil {
-		return nil, fmt.Errorf("post request: %w", err)
+		var zero T
+		return zero, fmt.Errorf("post request: %w", err)
 	}
 
 	// Wait for matching response
@@ -132,7 +135,8 @@ func (e *Evaluator) Evaluate(ctx context.Context, statement string) (json.RawMes
 			var response evaluationResponse
 
 			if err := json.Unmarshal([]byte(message.JSON), &response); err != nil {
-				return nil, fmt.Errorf("decode response: %w", err)
+				var zero T
+				return zero, fmt.Errorf("decode response: %w", err)
 			}
 
 			// Skip messages that are not evaluation responses
@@ -147,13 +151,23 @@ func (e *Evaluator) Evaluate(ctx context.Context, statement string) (json.RawMes
 
 			// Report evaluation errors
 			if response.Payload.Error != nil {
-				return nil, fmt.Errorf("javascript error [name=%s]: %s", response.Payload.Error.Name, response.Payload.Error.Message)
+				var zero T
+				return zero, fmt.Errorf("javascript error [name=%s]: %s", response.Payload.Error.Name, response.Payload.Error.Message)
 			}
 
-			return response.Payload.Result, nil
+			// Decode result
+			var decoded T
+
+			if err := json.Unmarshal(response.Payload.Result, &decoded); err != nil {
+				var zero T
+				return zero, fmt.Errorf("decode result: %w", err)
+			}
+
+			return decoded, nil
 
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			var zero T
+			return zero, ctx.Err()
 		}
 	}
 }

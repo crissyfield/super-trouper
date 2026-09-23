@@ -20,17 +20,6 @@ type deviceState struct {
 	address string        // Address of remote devices, empty otherwise.
 }
 
-// lookupDeviceState returns the state of the lookupDeviceState with the given handle. The caller must hold the
-// mutex.
-func (s *MCPServer) lookupDeviceState(handle string) (*deviceState, error) {
-	state, ok := s.devices[handle]
-	if !ok {
-		return nil, fmt.Errorf("unknown device handle [handle=%s]", handle)
-	}
-
-	return state, nil
-}
-
 // addDevicesTools registers the device tools.
 func (s *MCPServer) addDevicesTools() {
 	// List detected devices
@@ -76,6 +65,17 @@ func (s *MCPServer) addDevicesTools() {
 		Name:        "kill",
 		Description: "Kills a process on a Frida device.",
 	}, s.kill)
+}
+
+// lookupDeviceState returns the state of the lookupDeviceState with the given handle. The caller must hold the
+// mutex.
+func (s *MCPServer) lookupDeviceState(handle string) (*deviceState, error) {
+	state, ok := s.devices[handle]
+	if !ok {
+		return nil, fmt.Errorf("unknown device handle [handle=%s]", handle)
+	}
+
+	return state, nil
 }
 
 // closeFridaDevices closes the given Frida devices with a timeout context and logs any error.

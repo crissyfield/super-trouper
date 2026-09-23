@@ -21,17 +21,6 @@ type scriptState struct {
 	script        *frida.Script // Underlying Frida script.
 }
 
-// lookupScriptState returns the state of the lookupScriptState with the given handle. The caller must hold the
-// mutex.
-func (s *MCPServer) lookupScriptState(handle string) (*scriptState, error) {
-	state, ok := s.scripts[handle]
-	if !ok {
-		return nil, fmt.Errorf("unknown script handle [handle=%s]", handle)
-	}
-
-	return state, nil
-}
-
 // addScriptsTools registers the script tools.
 func (s *MCPServer) addScriptsTools() {
 	// Create a script
@@ -78,6 +67,17 @@ func (s *MCPServer) addScriptsTools() {
 		Description: "Returns the language bridges that can be exposed as globals in scripts created with " +
 			"script_create.",
 	}, s.scriptBridgeList)
+}
+
+// lookupScriptState returns the state of the lookupScriptState with the given handle. The caller must hold the
+// mutex.
+func (s *MCPServer) lookupScriptState(handle string) (*scriptState, error) {
+	state, ok := s.scripts[handle]
+	if !ok {
+		return nil, fmt.Errorf("unknown script handle [handle=%s]", handle)
+	}
+
+	return state, nil
 }
 
 // closeFridaScripts closes the given Frida scripts with a timeout context and logs any error.

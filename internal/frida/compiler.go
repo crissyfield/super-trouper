@@ -34,8 +34,7 @@ type compileOptions struct {
 	projectRoot string // Project root, empty for Frida's inferred default.
 }
 
-// WithCompilerProjectRoot sets the project root for a buikd. Current directory is used if not set.
-// absolute, or the current working directory otherwise.
+// WithCompileProjectRoot sets the project root for a build. Current directory is used if not set.
 func WithCompileProjectRoot(path string) CompileOption {
 	return func(options *compileOptions) { options.projectRoot = path }
 }
