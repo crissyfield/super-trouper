@@ -25,8 +25,10 @@ type evaluationRequest struct {
 }
 
 type evaluationRequestPayload struct {
-	ID     uint64 `json:"id"`
-	Source string `json:"source"`
+	ID      uint64 `json:"id"`
+	Source  string `json:"source,omitempty"`
+	Address string `json:"address,omitempty"`
+	Count   int    `json:"count,omitempty"`
 }
 
 type evaluationResponse struct {
@@ -127,6 +129,120 @@ func (e *Evaluator) Evaluate[T any](ctx context.Context, statement string) (T, e
 		return zero, fmt.Errorf("post request: %w", err)
 	}
 
+	// Wait for response
+	result, _, err := e.waitForResponse(ctx, e.requestID)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+
+	// Decode result
+	var decoded T
+
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		var zero T
+		return zero, fmt.Errorf("decode result: %w", err)
+	}
+
+	return decoded, nil
+}
+
+// ReadMemory reads the given number of bytes at the given address in the target and returns them.
+func (e *Evaluator) ReadMemory(ctx context.Context, address uint64, count int) ([]byte, error) {
+	// Synchronize access
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Early exit if evaluator is already closed
+	if e.closed {
+		return nil, errEvaluatorClosed
+	}
+
+	// Encode request
+	e.requestID++
+
+	encoded, err := json.Marshal(evaluationRequest{
+		Type: "memory_read",
+		Payload: evaluationRequestPayload{
+			ID:      e.requestID,
+			Address: fmt.Sprintf("0x%x", address),
+			Count:   count,
+		},
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("encode request: %w", err)
+	}
+
+	// Post request to script
+	if err := e.script.Post(string(encoded), nil); err != nil {
+		return nil, fmt.Errorf("post request: %w", err)
+	}
+
+	// Wait for response
+	_, data, err := e.waitForResponse(ctx, e.requestID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Reject responses without binary payload
+	if data == nil {
+		return nil, errors.New("no binary payload in response")
+	}
+
+	return data, nil
+}
+
+// WriteMemory writes the given bytes at the given address in the target and returns the number of bytes
+// written.
+func (e *Evaluator) WriteMemory(ctx context.Context, address uint64, data []byte) (int, error) {
+	// Synchronize access
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Early exit if evaluator is already closed
+	if e.closed {
+		return 0, errEvaluatorClosed
+	}
+
+	// Encode request
+	e.requestID++
+
+	encoded, err := json.Marshal(evaluationRequest{
+		Type: "memory_write",
+		Payload: evaluationRequestPayload{
+			ID:      e.requestID,
+			Address: fmt.Sprintf("0x%x", address),
+		},
+	})
+
+	if err != nil {
+		return 0, fmt.Errorf("encode request: %w", err)
+	}
+
+	// Post request to script, carrying the bytes as binary payload
+	if err := e.script.Post(string(encoded), data); err != nil {
+		return 0, fmt.Errorf("post request: %w", err)
+	}
+
+	// Wait for response
+	result, _, err := e.waitForResponse(ctx, e.requestID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Decode written count
+	var written int
+
+	if err := json.Unmarshal(result, &written); err != nil {
+		return 0, fmt.Errorf("decode result: %w", err)
+	}
+
+	return written, nil
+}
+
+// waitForResponse waits for the response with the given request ID and returns its JSON and  binary payload.
+func (e *Evaluator) waitForResponse(ctx context.Context, requestID uint64) (json.RawMessage, []byte, error) {
 	// Wait for matching response
 	for {
 		select {
@@ -135,39 +251,28 @@ func (e *Evaluator) Evaluate[T any](ctx context.Context, statement string) (T, e
 			var response evaluationResponse
 
 			if err := json.Unmarshal([]byte(message.JSON), &response); err != nil {
-				var zero T
-				return zero, fmt.Errorf("decode response: %w", err)
+				return nil, nil, fmt.Errorf("decode response: %w", err)
 			}
 
-			// Skip messages that are not evaluation responses
+			// Skip messages that are not responses
 			if response.Type != "send" {
 				continue
 			}
 
 			// Skip responses for other requests
-			if response.Payload.ID != e.requestID {
+			if response.Payload.ID != requestID {
 				continue
 			}
 
-			// Report evaluation errors
+			// Report errors
 			if response.Payload.Error != nil {
-				var zero T
-				return zero, fmt.Errorf("javascript error [name=%s]: %s", response.Payload.Error.Name, response.Payload.Error.Message)
+				return nil, nil, fmt.Errorf("javascript error [name=%s]: %s", response.Payload.Error.Name, response.Payload.Error.Message)
 			}
 
-			// Decode result
-			var decoded T
-
-			if err := json.Unmarshal(response.Payload.Result, &decoded); err != nil {
-				var zero T
-				return zero, fmt.Errorf("decode result: %w", err)
-			}
-
-			return decoded, nil
+			return response.Payload.Result, message.Data, nil
 
 		case <-ctx.Done():
-			var zero T
-			return zero, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 	}
 }

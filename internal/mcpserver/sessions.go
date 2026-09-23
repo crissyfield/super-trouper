@@ -54,8 +54,8 @@ func (s *MCPServer) lookupSessionState(handle string) (*sessionState, error) {
 	return state, nil
 }
 
-// evaluateInSession evaluates a statement in the evaluator of a session and returns its JSON result decoded to T.
-func (s *MCPServer) evaluateInSession[T any](ctx context.Context, handle string, statement string) (T, error) {
+// sessionEvaluator returns the persistent evaluator of the specified session, creating it on first use.
+func (s *MCPServer) sessionEvaluator(ctx context.Context, handle string) (*frida.Evaluator, error) {
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,23 +63,20 @@ func (s *MCPServer) evaluateInSession[T any](ctx context.Context, handle string,
 	// Look up session
 	state, err := s.lookupSessionState(handle)
 	if err != nil {
-		var zero T
-		return zero, err
+		return nil, err
 	}
 
 	// Create evaluator lazily
 	if state.evaluator == nil {
 		evaluator, err := s.manager.NewEvaluator(ctx, state.session, allBridgePackages())
 		if err != nil {
-			var zero T
-			return zero, fmt.Errorf("create evaluator: %w", err)
+			return nil, fmt.Errorf("create evaluator: %w", err)
 		}
 
 		state.evaluator = evaluator
 	}
 
-	// Evaluate statement
-	return state.evaluator.Evaluate[T](ctx, statement)
+	return state.evaluator, nil
 }
 
 // closeFridaSessions closes the given Frida sessions with a timeout context and logs any error.
@@ -221,8 +218,14 @@ type evaluateInput struct {
 
 // evaluate implements the 'evaluate' tool.
 func (s *MCPServer) evaluate(ctx context.Context, _ *mcp.CallToolRequest, in evaluateInput) (*mcp.CallToolResult, any, error) {
+	// Resolve evaluator
+	evaluator, err := s.sessionEvaluator(ctx, in.Session)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// Evaluate statement
-	value, err := s.evaluateInSession[any](ctx, in.Session, in.Statement)
+	value, err := evaluator.Evaluate[any](ctx, in.Statement)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,21 +14,29 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// Memory data encodings shared by the 'memory_read' and 'memory_write' tools.
+const (
+	encodingHex     = "hex"
+	encodingBase64  = "base64"
+	encodingUTF8    = "utf8"
+	encodingCstring = "cstring"
+)
+
 // addMemoryTools registers the memory tools.
 func (s *MCPServer) addMemoryTools() {
 	// Read memory
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name: "memory_read",
-		Description: "Reads up to 4096 bytes of memory in an attached process and returns it as hex, UTF-8, " +
-			"or a NUL-terminated C string. Fails if any byte of the range cannot be read.",
+		Description: "Reads up to 4096 bytes of memory in an attached process and returns it as hex, base64, " +
+			"UTF-8, or a NUL-terminated C string. Fails if any byte of the range cannot be read.",
 	}, s.memoryRead)
 
 	// Write memory
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name: "memory_write",
-		Description: "Writes up to 4096 bytes of memory in an attached process, given as a hex string. Fails " +
-			"if the memory cannot be written; code pages are typically write-protected, so patching code is " +
-			"out of scope.",
+		Description: "Writes up to 4096 bytes of memory in an attached process, given as hex (default) or " +
+			"base64, selected via the encoding parameter. Fails if the memory cannot be written; code pages " +
+			"are typically write-protected, so patching code is out of scope.",
 	}, s.memoryWrite)
 }
 
@@ -50,7 +59,7 @@ type memoryReadInput struct {
 	Session string `json:"session" jsonschema:"handle of the session to read memory in"`
 	Address string `json:"address" jsonschema:"hex address to read from, with or without 0x prefix"`
 	Count   uint   `json:"count,omitempty" jsonschema:"number of bytes to read (1-4096, default 256)"`
-	Format  string `json:"format,omitempty" jsonschema:"output format: 'hex' (default), 'utf8', or 'cstring'"`
+	Format  string `json:"format,omitempty" jsonschema:"output format: 'hex' (default), 'base64', 'utf8', or 'cstring'"`
 }
 
 // memoryReadOutput contains the output of the 'memory_read' tool.
@@ -64,7 +73,7 @@ func (s *MCPServer) memoryRead(ctx context.Context, _ *mcp.CallToolRequest, in m
 	// Validate format
 	format := strings.ToLower(in.Format)
 
-	if (format != "") && (format != "hex") && (format != "utf8") && (format != "cstring") {
+	if (format != "") && (format != encodingHex) && (format != encodingBase64) && (format != encodingUTF8) && (format != encodingCstring) {
 		return nil, memoryReadOutput{}, fmt.Errorf("invalid format [format=%s]", in.Format)
 	}
 
@@ -85,41 +94,26 @@ func (s *MCPServer) memoryRead(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, memoryReadOutput{}, err
 	}
 
-	// Evaluate statement
-	encoded, err := s.evaluateInSession[string](
-		ctx,
-		in.Session,
-		fmt.Sprintf(
-			`
-				(() => {
-					const b = new Uint8Array(ptr("0x%x").readByteArray(%d));
-					let h = "";
-					for (let i = 0; i < b.length; i++) {
-						h += b[i].toString(16).padStart(2, "0");
-					}
-					return h;
-				})()
-			`,
-			address,
-			count,
-		),
-	)
+	// Read memory
+	evaluator, err := s.sessionEvaluator(ctx, in.Session)
+	if err != nil {
+		return nil, memoryReadOutput{}, err
+	}
 
+	raw, err := evaluator.ReadMemory(ctx, address, int(count))
 	if err != nil {
 		return nil, memoryReadOutput{}, fmt.Errorf("read memory: %w", err)
 	}
 
-	// Decode hex string
-	raw, err := hex.DecodeString(encoded)
-	if err != nil {
-		return nil, memoryReadOutput{}, fmt.Errorf("decode memory data: %w", err)
-	}
-
 	// Format output
-	data := encoded
+	data := hex.EncodeToString(raw)
 
 	switch format {
-	case "utf8":
+	case encodingBase64:
+		// Return the bytes as base64
+		data = base64.StdEncoding.EncodeToString(raw)
+
+	case encodingUTF8:
 		// Return the longest valid UTF-8 string
 		for index := 0; index < len(raw); {
 			r, size := utf8.DecodeRune(raw[index:])
@@ -134,7 +128,7 @@ func (s *MCPServer) memoryRead(ctx context.Context, _ *mcp.CallToolRequest, in m
 
 		data = string(raw)
 
-	case "cstring":
+	case encodingCstring:
 		// Return C-String, up to the first NUL byte
 		if nul := bytes.IndexByte(raw, 0x00); nul >= 0 {
 			raw = raw[:nul]
@@ -148,9 +142,10 @@ func (s *MCPServer) memoryRead(ctx context.Context, _ *mcp.CallToolRequest, in m
 
 // memoryWriteInput contains the input arguments of the 'memory_write' tool.
 type memoryWriteInput struct {
-	Session string `json:"session" jsonschema:"handle of the session to write memory in"`
-	Address string `json:"address" jsonschema:"hex address to write to, with or without 0x prefix"`
-	Bytes   string `json:"bytes" jsonschema:"bytes to write as a hex string (even length, up to 8192 characters)"`
+	Session  string `json:"session" jsonschema:"handle of the session to write memory in"`
+	Address  string `json:"address" jsonschema:"hex address to write to, with or without 0x prefix"`
+	Encoding string `json:"encoding,omitempty" jsonschema:"encoding of 'bytes': 'hex' (default) or 'base64'"`
+	Bytes    string `json:"bytes" jsonschema:"bytes to write, encoded as given by 'encoding' (up to 4096 bytes)"`
 }
 
 // memoryWriteOutput contains the output of the 'memory_write' tool.
@@ -160,21 +155,47 @@ type memoryWriteOutput struct {
 
 // memoryWrite implements the 'memory_write' tool.
 func (s *MCPServer) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, in memoryWriteInput) (*mcp.CallToolResult, memoryWriteOutput, error) {
+	// Validate encoding
+	encoding := strings.ToLower(in.Encoding)
+
+	if (encoding != "") && (encoding != encodingHex) && (encoding != encodingBase64) {
+		return nil, memoryWriteOutput{}, fmt.Errorf("invalid encoding [encoding=%s]", in.Encoding)
+	}
+
 	// Validate bytes
 	if in.Bytes == "" {
 		return nil, memoryWriteOutput{}, errors.New("bytes must not be empty")
 	}
 
-	if len(in.Bytes) > 8192 {
-		return nil, memoryWriteOutput{}, errors.New("bytes must be less or equal to 8192 hex characters")
-	}
+	// Decode bytes
+	var raw []byte
+	var err error
 
-	if len(in.Bytes)%2 != 0 {
-		return nil, memoryWriteOutput{}, errors.New("bytes must have an even number of hex characters")
-	}
+	switch encoding {
+	case encodingBase64:
+		raw, err = base64.StdEncoding.DecodeString(in.Bytes)
+		if err != nil {
+			return nil, memoryWriteOutput{}, fmt.Errorf("invalid base64 bytes: %w", err)
+		}
 
-	if _, err := hex.DecodeString(in.Bytes); err != nil {
-		return nil, memoryWriteOutput{}, fmt.Errorf("invalid hex bytes: %w", err)
+		if len(raw) > 4096 {
+			return nil, memoryWriteOutput{}, errors.New("bytes must be less or equal to 4096 bytes")
+		}
+
+	default:
+		// Hex (default)
+		if len(in.Bytes) > 8192 {
+			return nil, memoryWriteOutput{}, errors.New("bytes must be less or equal to 8192 hex characters")
+		}
+
+		if len(in.Bytes)%2 != 0 {
+			return nil, memoryWriteOutput{}, errors.New("bytes must have an even number of hex characters")
+		}
+
+		raw, err = hex.DecodeString(in.Bytes)
+		if err != nil {
+			return nil, memoryWriteOutput{}, fmt.Errorf("invalid hex bytes: %w", err)
+		}
 	}
 
 	// Validate address
@@ -183,30 +204,16 @@ func (s *MCPServer) memoryWrite(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, memoryWriteOutput{}, err
 	}
 
-	// Evaluate statement
-	written, err := s.evaluateInSession[uint](
-		ctx,
-		in.Session,
-		fmt.Sprintf(
-			`
-				(() => {
-					const h = %q;
-					const b = new Uint8Array(h.length / 2);
-					for (let i = 0; i < b.length; i++) {
-						b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
-					}
-					ptr("0x%x").writeByteArray(b);
-					return b.length;
-				})()
-			`,
-			strings.ToLower(in.Bytes),
-			address,
-		),
-	)
+	// Write memory
+	evaluator, err := s.sessionEvaluator(ctx, in.Session)
+	if err != nil {
+		return nil, memoryWriteOutput{}, err
+	}
 
+	written, err := evaluator.WriteMemory(ctx, address, raw)
 	if err != nil {
 		return nil, memoryWriteOutput{}, fmt.Errorf("write memory: %w", err)
 	}
 
-	return nil, memoryWriteOutput{Written: written}, nil
+	return nil, memoryWriteOutput{Written: uint(written)}, nil
 }
