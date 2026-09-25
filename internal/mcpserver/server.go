@@ -48,10 +48,12 @@ func New(manager *frida.Manager, codeShare *codeshare.CodeShare, version string)
 	server.addCodeShareTools()
 	server.addDevicesTools()
 	server.addMemoryTools()
+	server.addModulesTools()
 	server.addProcessesTools()
 	server.addScriptsTools()
 	server.addSessionsTools()
 	server.addStatusTools()
+	server.addThreadsTools()
 
 	return server
 }
