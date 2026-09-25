@@ -13,35 +13,35 @@ import (
 	"github.com/crissyfield/super-trouper/internal/frida"
 )
 
-// sessionState contains the state of a Frida session created by the 'attach' tool.
+// sessionState contains the state of a Frida session created by the 'session_attach' tool.
 type sessionState struct {
 	deviceHandle string           // Handle of the owning device.
 	session      *frida.Session   // Underlying Frida session.
 	pid          uint             // PID of the attached process.
-	evaluator    *frida.Evaluator // Persistent evaluator, created lazily by the 'evaluate' tool.
+	evaluator    *frida.Evaluator // Persistent evaluator, created lazily by the 'session_eval' tool.
 }
 
 // addSessionsTools registers the session tools.
 func (s *MCPServer) addSessionsTools() {
 	// Attach to a process
 	mcp.AddTool(s.server, &mcp.Tool{
-		Name: "attach",
+		Name: "session_attach",
 		Description: "Attaches to a process on a Frida device, either by PID or by name. Returns a session " +
 			"handle used by the session tools.",
-	}, s.attach)
+	}, s.sessionAttach)
 
 	// Detach from a process
 	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "detach",
+		Name:        "session_detach",
 		Description: "Detaches from a process, closing all of its scripts and its session.",
-	}, s.detach)
+	}, s.sessionDetach)
 
 	// Evaluate a JavaScript statement
 	mcp.AddTool(s.server, &mcp.Tool{
-		Name: "evaluate",
+		Name: "session_eval",
 		Description: "Evaluates a JavaScript statement in an attached process and returns its JSON result. " +
 			"The first call sets up a persistent evaluator in the session.",
-	}, s.evaluate)
+	}, s.sessionEval)
 }
 
 // lookupSessionState returns the state of the session with the given handle. The caller must hold the mutex.
@@ -93,25 +93,25 @@ func closeFridaSessions(sessions ...*frida.Session) {
 	}
 }
 
-// attachInput contains the input arguments of the 'attach' tool.
-type attachInput struct {
+// sessionAttachInput contains the input arguments of the 'session_attach' tool.
+type sessionAttachInput struct {
 	Device string  `json:"device" jsonschema:"handle of the device owning the process"`
 	PID    uint    `json:"pid,omitempty" jsonschema:"PID of the process to attach"`
 	Name   string  `json:"name,omitempty" jsonschema:"name of the process to attach, matching is case-insensitive"`
 	WaitMs float64 `json:"wait_ms,omitempty" jsonschema:"how long to wait for a process given by name to appear (in milliseconds)"`
 }
 
-// attachOutput contains the output of the 'attach' tool.
-type attachOutput struct {
+// sessionAttachOutput contains the output of the 'session_attach' tool.
+type sessionAttachOutput struct {
 	Session string `json:"session" jsonschema:"handle of the session, used by the other session tools"`
 	PID     uint   `json:"pid" jsonschema:"PID of the attached process"`
 }
 
-// attach implements the 'attach' tool.
-func (s *MCPServer) attach(ctx context.Context, _ *mcp.CallToolRequest, in attachInput) (*mcp.CallToolResult, attachOutput, error) {
+// sessionAttach implements the 'session_attach' tool.
+func (s *MCPServer) sessionAttach(ctx context.Context, _ *mcp.CallToolRequest, in sessionAttachInput) (*mcp.CallToolResult, sessionAttachOutput, error) {
 	// Validate input
 	if (in.PID != 0) == (in.Name != "") {
-		return nil, attachOutput{}, errors.New("exactly one of PID or name must be given")
+		return nil, sessionAttachOutput{}, errors.New("exactly one of PID or name must be given")
 	}
 
 	// Synchronize access
@@ -121,7 +121,7 @@ func (s *MCPServer) attach(ctx context.Context, _ *mcp.CallToolRequest, in attac
 	// Look up device
 	state, err := s.lookupDeviceState(in.Device)
 	if err != nil {
-		return nil, attachOutput{}, err
+		return nil, sessionAttachOutput{}, err
 	}
 
 	// Resolve target process by name
@@ -138,11 +138,11 @@ func (s *MCPServer) attach(ctx context.Context, _ *mcp.CallToolRequest, in attac
 		// Find process by name
 		process, err := state.device.FindProcessByName(ctx, in.Name, options...)
 		if err != nil {
-			return nil, attachOutput{}, fmt.Errorf("find process: %w", err)
+			return nil, sessionAttachOutput{}, fmt.Errorf("find process: %w", err)
 		}
 
 		if process == nil {
-			return nil, attachOutput{}, fmt.Errorf("process not found [name=%s]", in.Name)
+			return nil, sessionAttachOutput{}, fmt.Errorf("process not found [name=%s]", in.Name)
 		}
 
 		pid = process.PID
@@ -151,7 +151,7 @@ func (s *MCPServer) attach(ctx context.Context, _ *mcp.CallToolRequest, in attac
 	// Attach to process
 	session, err := state.device.Attach(ctx, pid)
 	if err != nil {
-		return nil, attachOutput{}, fmt.Errorf("attach process: %w", err)
+		return nil, sessionAttachOutput{}, fmt.Errorf("attach process: %w", err)
 	}
 
 	// Register session
@@ -162,19 +162,19 @@ func (s *MCPServer) attach(ctx context.Context, _ *mcp.CallToolRequest, in attac
 		pid:          pid,
 	}
 
-	return nil, attachOutput{Session: handle, PID: pid}, nil
+	return nil, sessionAttachOutput{Session: handle, PID: pid}, nil
 }
 
-// detachInput contains the input arguments of the 'detach' tool.
-type detachInput struct {
+// sessionDetachInput contains the input arguments of the 'session_detach' tool.
+type sessionDetachInput struct {
 	Session string `json:"session" jsonschema:"handle of the session to detach"`
 }
 
-// detachOutput contains the output of the 'detach' tool.
-type detachOutput struct{}
+// sessionDetachOutput contains the output of the 'session_detach' tool.
+type sessionDetachOutput struct{}
 
-// detach implements the 'detach' tool.
-func (s *MCPServer) detach(ctx context.Context, _ *mcp.CallToolRequest, in detachInput) (*mcp.CallToolResult, detachOutput, error) {
+// sessionDetach implements the 'session_detach' tool.
+func (s *MCPServer) sessionDetach(ctx context.Context, _ *mcp.CallToolRequest, in sessionDetachInput) (*mcp.CallToolResult, sessionDetachOutput, error) {
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -182,7 +182,7 @@ func (s *MCPServer) detach(ctx context.Context, _ *mcp.CallToolRequest, in detac
 	// Look up session
 	state, err := s.lookupSessionState(in.Session)
 	if err != nil {
-		return nil, detachOutput{}, err
+		return nil, sessionDetachOutput{}, err
 	}
 
 	// Collect session scripts and remove the session from state
@@ -207,17 +207,17 @@ func (s *MCPServer) detach(ctx context.Context, _ *mcp.CallToolRequest, in detac
 	closeFridaScripts(scripts...)
 	closeFridaSessions(state.session)
 
-	return nil, detachOutput{}, nil
+	return nil, sessionDetachOutput{}, nil
 }
 
-// evaluateInput contains the input arguments of the 'evaluate' tool.
-type evaluateInput struct {
+// sessionEvalInput contains the input arguments of the 'session_eval' tool.
+type sessionEvalInput struct {
 	Session   string `json:"session" jsonschema:"handle of the session to evaluate the statement in"`
 	Statement string `json:"statement" jsonschema:"JavaScript statement to evaluate"`
 }
 
-// evaluate implements the 'evaluate' tool.
-func (s *MCPServer) evaluate(ctx context.Context, _ *mcp.CallToolRequest, in evaluateInput) (*mcp.CallToolResult, any, error) {
+// sessionEval implements the 'session_eval' tool.
+func (s *MCPServer) sessionEval(ctx context.Context, _ *mcp.CallToolRequest, in sessionEvalInput) (*mcp.CallToolResult, any, error) {
 	// Resolve evaluator
 	evaluator, err := s.sessionEvaluator(ctx, in.Session)
 	if err != nil {

@@ -28,9 +28,9 @@ func New(manager *frida.Manager, codeShare *codeshare.CodeShare, version string)
 	// Create server instance
 	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "super-trouper", Version: version}, &mcp.ServerOptions{
 		Instructions: "Tools for the Frida dynamic instrumentation toolkit. Connect to a device with " +
-			"device_connect, list its applications and processes, attach to a process, evaluate " +
-			"TypeScript or JavaScript in the target, and manage custom scripts. Use the codeshare tools to " +
-			"discover and fetch scripts from Frida CodeShare.",
+			"device_connect, list its applications and processes, attach to a process with session_attach, " +
+			"or evaluate TypeScript and JavaScript in the target with session_eval. Manage custom scripts " +
+			"and use the codeshare tools to discover and fetch scripts from Frida CodeShare.",
 	})
 
 	server := &MCPServer{

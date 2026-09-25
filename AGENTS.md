@@ -7,7 +7,7 @@
 - Format changed Go files with `gofmt -w <files>`.
 - `go vet ./...` is the fast verification; `golangci-lint run ./...` is the full lint check (`.golangci.yml` v2).
 - NEVER add test files to this project.
-- On a SIP-enabled macOS host without root, process injection fails with a frida-core timeout ("Timeout was reached"), so end-to-end testing of the MCP `attach` tool and evaluator needs privileges; device listing, application/process listing, spawning, and killing work without them.
+- On a SIP-enabled macOS host without root, process injection fails with a frida-core timeout ("Timeout was reached"), so end-to-end testing of the MCP `session_attach` tool and evaluator needs privileges; device listing, application/process listing, spawning, and killing work without them.
 - Typical post-edit flow: `gofmt -w <files>`, then `go vet ./...` (or `golangci-lint run ./...` for full lint), then `go build ./...`.
 
 ## Structure

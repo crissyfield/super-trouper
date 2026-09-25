@@ -50,21 +50,21 @@ func (s *MCPServer) addDevicesTools() {
 
 	// Spawn a suspended process
 	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "spawn",
-		Description: "Spawns a process on a Frida device in a suspended state. Use resume to start it.",
-	}, s.spawn)
+		Name:        "device_spawn",
+		Description: "Spawns a process on a Frida device in a suspended state. Use device_resume to start it.",
+	}, s.deviceSpawn)
 
 	// Resume a process
 	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "resume",
+		Name:        "device_resume",
 		Description: "Resumes a suspended process on a Frida device.",
-	}, s.resume)
+	}, s.deviceResume)
 
 	// Kill a process
 	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "kill",
+		Name:        "device_kill",
 		Description: "Kills a process on a Frida device.",
-	}, s.kill)
+	}, s.deviceKill)
 }
 
 // lookupDeviceState returns the state of the lookupDeviceState with the given handle. The caller must hold the
@@ -298,8 +298,8 @@ func (s *MCPServer) deviceParams(ctx context.Context, _ *mcp.CallToolRequest, in
 	return nil, deviceParamsOutput{Params: params}, nil
 }
 
-// spawnInput contains the input arguments of the 'spawn' tool.
-type spawnInput struct {
+// deviceSpawnInput contains the input arguments of the 'device_spawn' tool.
+type deviceSpawnInput struct {
 	Device string            `json:"device" jsonschema:"handle of the device to spawn the process on"`
 	Name   string            `json:"name" jsonschema:"name or path of the program to spawn"`
 	Argv   []string          `json:"argv,omitempty" jsonschema:"arguments to pass to the program"`
@@ -307,13 +307,13 @@ type spawnInput struct {
 	Cwd    string            `json:"cwd,omitempty" jsonschema:"working directory of the process"`
 }
 
-// spawnOutput contains the output of the 'spawn' tool.
-type spawnOutput struct {
+// deviceSpawnOutput contains the output of the 'device_spawn' tool.
+type deviceSpawnOutput struct {
 	PID uint `json:"pid" jsonschema:"PID of the suspended process"`
 }
 
-// spawn implements the 'spawn' tool.
-func (s *MCPServer) spawn(ctx context.Context, _ *mcp.CallToolRequest, in spawnInput) (*mcp.CallToolResult, spawnOutput, error) {
+// deviceSpawn implements the 'device_spawn' tool.
+func (s *MCPServer) deviceSpawn(ctx context.Context, _ *mcp.CallToolRequest, in deviceSpawnInput) (*mcp.CallToolResult, deviceSpawnOutput, error) {
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -321,7 +321,7 @@ func (s *MCPServer) spawn(ctx context.Context, _ *mcp.CallToolRequest, in spawnI
 	// Look up device
 	state, err := s.lookupDeviceState(in.Device)
 	if err != nil {
-		return nil, spawnOutput{}, err
+		return nil, deviceSpawnOutput{}, err
 	}
 
 	// Assemble spawn options
@@ -342,23 +342,23 @@ func (s *MCPServer) spawn(ctx context.Context, _ *mcp.CallToolRequest, in spawnI
 	// Spawn process
 	pid, err := state.device.Spawn(ctx, in.Name, options...)
 	if err != nil {
-		return nil, spawnOutput{}, fmt.Errorf("spawn process: %w", err)
+		return nil, deviceSpawnOutput{}, fmt.Errorf("spawn process: %w", err)
 	}
 
-	return nil, spawnOutput{PID: pid}, nil
+	return nil, deviceSpawnOutput{PID: pid}, nil
 }
 
-// resumeInput contains the input arguments of the 'resume' tool.
-type resumeInput struct {
+// deviceResumeInput contains the input arguments of the 'device_resume' tool.
+type deviceResumeInput struct {
 	Device string `json:"device" jsonschema:"handle of the device owning the process"`
 	PID    uint   `json:"pid" jsonschema:"PID of the process to resume"`
 }
 
-// resumeOutput contains the output of the 'resume' tool.
-type resumeOutput struct{}
+// deviceResumeOutput contains the output of the 'device_resume' tool.
+type deviceResumeOutput struct{}
 
-// resume implements the 'resume' tool.
-func (s *MCPServer) resume(ctx context.Context, _ *mcp.CallToolRequest, in resumeInput) (*mcp.CallToolResult, resumeOutput, error) {
+// deviceResume implements the 'device_resume' tool.
+func (s *MCPServer) deviceResume(ctx context.Context, _ *mcp.CallToolRequest, in deviceResumeInput) (*mcp.CallToolResult, deviceResumeOutput, error) {
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -366,28 +366,28 @@ func (s *MCPServer) resume(ctx context.Context, _ *mcp.CallToolRequest, in resum
 	// Look up device
 	state, err := s.lookupDeviceState(in.Device)
 	if err != nil {
-		return nil, resumeOutput{}, err
+		return nil, deviceResumeOutput{}, err
 	}
 
 	// Resume process
 	if err := state.device.Resume(ctx, in.PID); err != nil {
-		return nil, resumeOutput{}, fmt.Errorf("resume process: %w", err)
+		return nil, deviceResumeOutput{}, fmt.Errorf("resume process: %w", err)
 	}
 
-	return nil, resumeOutput{}, nil
+	return nil, deviceResumeOutput{}, nil
 }
 
-// killInput contains the input arguments of the 'kill' tool.
-type killInput struct {
+// deviceKillInput contains the input arguments of the 'device_kill' tool.
+type deviceKillInput struct {
 	Device string `json:"device" jsonschema:"handle of the device owning the process"`
 	PID    uint   `json:"pid" jsonschema:"PID of the process to kill"`
 }
 
-// killOutput contains the output of the 'kill' tool.
-type killOutput struct{}
+// deviceKillOutput contains the output of the 'device_kill' tool.
+type deviceKillOutput struct{}
 
-// kill implements the 'kill' tool.
-func (s *MCPServer) kill(ctx context.Context, _ *mcp.CallToolRequest, in killInput) (*mcp.CallToolResult, killOutput, error) {
+// deviceKill implements the 'device_kill' tool.
+func (s *MCPServer) deviceKill(ctx context.Context, _ *mcp.CallToolRequest, in deviceKillInput) (*mcp.CallToolResult, deviceKillOutput, error) {
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -395,13 +395,13 @@ func (s *MCPServer) kill(ctx context.Context, _ *mcp.CallToolRequest, in killInp
 	// Look up device
 	state, err := s.lookupDeviceState(in.Device)
 	if err != nil {
-		return nil, killOutput{}, err
+		return nil, deviceKillOutput{}, err
 	}
 
 	// Kill process
 	if err := state.device.Kill(ctx, in.PID); err != nil {
-		return nil, killOutput{}, fmt.Errorf("kill process: %w", err)
+		return nil, deviceKillOutput{}, fmt.Errorf("kill process: %w", err)
 	}
 
-	return nil, killOutput{}, nil
+	return nil, deviceKillOutput{}, nil
 }
