@@ -69,23 +69,23 @@ func (s *MCPServer) appList(ctx context.Context, _ *mcp.CallToolRequest, in appL
 		return nil, appListOutput{}, err
 	}
 
-	// Assemble list options
-	var options []frida.ApplicationOption
+	// Assemble list opts
+	var opts []frida.ListApplicationOption
 
 	if len(in.Identifiers) != 0 {
-		options = append(options, frida.WithApplicationIdentifiers(in.Identifiers...))
+		opts = append(opts, frida.WithApplicationIdentifiers(in.Identifiers...))
 	}
 
 	if len(in.Names) != 0 {
-		options = append(options, frida.WithApplicationNames(in.Names...))
+		opts = append(opts, frida.WithApplicationNames(in.Names...))
 	}
 
 	if in.Scope != "" {
-		options = append(options, frida.WithApplicationScope(frida.ApplicationScope(in.Scope)))
+		opts = append(opts, frida.WithApplicationScope(frida.ApplicationScope(in.Scope)))
 	}
 
 	// List applications
-	apps, err := state.device.ListApplications(ctx, options...)
+	apps, err := state.device.ListApplications(ctx, opts...)
 	if err != nil {
 		return nil, appListOutput{}, fmt.Errorf("list applications: %w", err)
 	}
@@ -110,6 +110,7 @@ type appFindInput struct {
 	Device     string `json:"device" jsonschema:"handle of the device to search"`
 	Identifier string `json:"identifier,omitempty" jsonschema:"bundle identifier of the application to find"`
 	Name       string `json:"name,omitempty" jsonschema:"name of the application to find"`
+	Scope      string `json:"scope,omitempty" jsonschema:"application detail level: minimal (default), metadata, or full"`
 }
 
 // appFindOutput contains the output of the 'app_find' tool.
@@ -119,9 +120,14 @@ type appFindOutput struct {
 
 // appFind implements the 'app_find' tool.
 func (s *MCPServer) appFind(ctx context.Context, _ *mcp.CallToolRequest, in appFindInput) (*mcp.CallToolResult, appFindOutput, error) {
-	// Validate input
+	// Validate identififier and name
 	if (in.Identifier != "") == (in.Name != "") {
 		return nil, appFindOutput{}, errors.New("either application identifier or name must be given")
+	}
+
+	// Validate scope
+	if (in.Scope != "") && (in.Scope != string(frida.ApplicationScopeMinimal)) && (in.Scope != string(frida.ApplicationScopeMetadata)) && (in.Scope != string(frida.ApplicationScopeFull)) {
+		return nil, appFindOutput{}, fmt.Errorf("invalid application scope [scope=%s]", in.Scope)
 	}
 
 	// Synchronize access
@@ -136,11 +142,16 @@ func (s *MCPServer) appFind(ctx context.Context, _ *mcp.CallToolRequest, in appF
 
 	// Find application
 	var app *frida.Application
+	var opts []frida.FindApplicationOption
+
+	if in.Scope != "" {
+		opts = append(opts, frida.WithFindApplicationScope(frida.ApplicationScope(in.Scope)))
+	}
 
 	switch {
 	case in.Identifier != "":
 		// Find application by identifier
-		app, err = state.device.FindApplicationByIdentifier(ctx, in.Identifier)
+		app, err = state.device.FindApplicationByIdentifier(ctx, in.Identifier, opts...)
 		if err != nil {
 			return nil, appFindOutput{}, fmt.Errorf("find application: %w", err)
 		}
@@ -151,7 +162,7 @@ func (s *MCPServer) appFind(ctx context.Context, _ *mcp.CallToolRequest, in appF
 
 	default:
 		// Find application by name
-		app, err = state.device.FindApplicationByName(ctx, in.Name)
+		app, err = state.device.FindApplicationByName(ctx, in.Name, opts...)
 		if err != nil {
 			return nil, appFindOutput{}, fmt.Errorf("find application: %w", err)
 		}
@@ -173,6 +184,7 @@ func (s *MCPServer) appFind(ctx context.Context, _ *mcp.CallToolRequest, in appF
 // appFrontmostInput contains the input arguments of the 'app_frontmost' tool.
 type appFrontmostInput struct {
 	Device string `json:"device" jsonschema:"handle of the device to query"`
+	Scope  string `json:"scope,omitempty" jsonschema:"application detail level: minimal (default), metadata, or full"`
 }
 
 // appFrontmostOutput contains the output of the 'app_frontmost' tool.
@@ -182,6 +194,11 @@ type appFrontmostOutput struct {
 
 // appFrontmost implements the 'app_frontmost' tool.
 func (s *MCPServer) appFrontmost(ctx context.Context, _ *mcp.CallToolRequest, in appFrontmostInput) (*mcp.CallToolResult, appFrontmostOutput, error) {
+	// Validate scope
+	if (in.Scope != "") && (in.Scope != string(frida.ApplicationScopeMinimal)) && (in.Scope != string(frida.ApplicationScopeMetadata)) && (in.Scope != string(frida.ApplicationScopeFull)) {
+		return nil, appFrontmostOutput{}, fmt.Errorf("invalid application scope [scope=%s]", in.Scope)
+	}
+
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -193,7 +210,13 @@ func (s *MCPServer) appFrontmost(ctx context.Context, _ *mcp.CallToolRequest, in
 	}
 
 	// Query frontmost application
-	app, err := state.device.FrontmostApplication(ctx)
+	var opts []frida.FindApplicationOption
+
+	if in.Scope != "" {
+		opts = append(opts, frida.WithFindApplicationScope(frida.ApplicationScope(in.Scope)))
+	}
+
+	app, err := state.device.FrontmostApplication(ctx, opts...)
 	if err != nil {
 		return nil, appFrontmostOutput{}, fmt.Errorf("query frontmost application: %w", err)
 	}

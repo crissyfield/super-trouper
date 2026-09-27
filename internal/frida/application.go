@@ -21,34 +21,34 @@ type Application struct {
 	Running    bool   // Whether the application is running.
 }
 
-// ApplicationOption configures a single aspect of a Device.ListApplications call.
-type ApplicationOption func(*applicationOptions)
+// ListApplicationOption configures a single aspect of a Device.ListApplications call.
+type ListApplicationOption func(*listApplicationOptions)
 
-// applicationOptions holds the options for a Device.ListApplications call.
-type applicationOptions struct {
+// listApplicationOptions holds the options for a Device.ListApplications call.
+type listApplicationOptions struct {
 	identifiers []string         // Bundle identifiers requested from the device.
 	names       []string         // Names that applications must match.
 	scope       ApplicationScope // Detail level requested from the device.
 }
 
 // WithApplicationIdentifiers restricts the enumeration to the application with the given bundle identifier(s).
-func WithApplicationIdentifiers(ids ...string) ApplicationOption {
-	return func(options *applicationOptions) { options.identifiers = append(options.identifiers, ids...) }
+func WithApplicationIdentifiers(ids ...string) ListApplicationOption {
+	return func(options *listApplicationOptions) { options.identifiers = append(options.identifiers, ids...) }
 }
 
 // WithApplicationNames restricts the enumeration to applications whose name(s) match exactly.
-func WithApplicationNames(names ...string) ApplicationOption {
-	return func(options *applicationOptions) { options.names = append(options.names, names...) }
+func WithApplicationNames(names ...string) ListApplicationOption {
+	return func(options *listApplicationOptions) { options.names = append(options.names, names...) }
 }
 
 // WithApplicationScope sets the detail level returned for applications.
-func WithApplicationScope(scope ApplicationScope) ApplicationOption {
-	return func(options *applicationOptions) { options.scope = scope }
+func WithApplicationScope(scope ApplicationScope) ListApplicationOption {
+	return func(options *listApplicationOptions) { options.scope = scope }
 }
 
 // ListApplications returns the applications installed on the remote device. The result is filtered according to the
 // given options.
-func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption) ([]Application, error) {
+func (d *Device) ListApplications(ctx context.Context, opts ...ListApplicationOption) ([]Application, error) {
 	// Synchronize access
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -60,7 +60,7 @@ func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption
 
 	// Assemble options
 	var options *C.FridaApplicationQueryOptions
-	var config applicationOptions
+	var config listApplicationOptions
 
 	for _, opt := range opts {
 		opt(&config)
@@ -143,16 +143,41 @@ func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption
 	return apps, nil
 }
 
+// FindApplicationOption configures a single aspect of an application lookup call.
+type FindApplicationOption func(*findApplicationOptions)
+
+// findApplicationOptions holds the options for application lookup calls.
+type findApplicationOptions struct {
+	scope ApplicationScope // Detail level requested from the device.
+}
+
+// WithFindApplicationScope sets the detail level returned for application lookups.
+func WithFindApplicationScope(scope ApplicationScope) FindApplicationOption {
+	return func(options *findApplicationOptions) { options.scope = scope }
+}
+
 // FindApplicationByIdentifier returns the application with the given bundle identifier, or nil if no such application is
-// installed on the remote device.
-func (d *Device) FindApplicationByIdentifier(ctx context.Context, identifier string) (*Application, error) {
+// installed on the remote device. The result is configured according to the given options.
+func (d *Device) FindApplicationByIdentifier(ctx context.Context, identifier string, opts ...FindApplicationOption) (*Application, error) {
 	// Validate input
 	if identifier == "" {
 		return nil, errors.New("no identifier given")
 	}
 
+	// Assemble options
+	var config findApplicationOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
 	// Look up application by identifier
-	apps, err := d.ListApplications(ctx, WithApplicationIdentifiers(identifier))
+	apps, err := d.ListApplications(
+		ctx,
+		WithApplicationIdentifiers(identifier),
+		WithApplicationScope(config.scope),
+	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -166,15 +191,27 @@ func (d *Device) FindApplicationByIdentifier(ctx context.Context, identifier str
 }
 
 // FindApplicationByName returns the first application with the given name, or nil if no such application is installed on
-// the remote device.
-func (d *Device) FindApplicationByName(ctx context.Context, name string) (*Application, error) {
+// the remote device. The result is configured according to the given options.
+func (d *Device) FindApplicationByName(ctx context.Context, name string, opts ...FindApplicationOption) (*Application, error) {
 	// Validate input
 	if name == "" {
 		return nil, errors.New("no name given")
 	}
 
+	// Assemble options
+	var config findApplicationOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
 	// Look up application by name
-	apps, err := d.ListApplications(ctx, WithApplicationNames(name))
+	apps, err := d.ListApplications(
+		ctx,
+		WithApplicationNames(name),
+		WithApplicationScope(config.scope),
+	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -187,8 +224,9 @@ func (d *Device) FindApplicationByName(ctx context.Context, name string) (*Appli
 	return &apps[0], nil
 }
 
-// FrontmostApplication returns the frontmost application on the remote device, or nil if there is none.
-func (d *Device) FrontmostApplication(ctx context.Context) (*Application, error) {
+// FrontmostApplication returns the frontmost application on the remote device, or nil if there is none. The result is
+// configured according to the given options.
+func (d *Device) FrontmostApplication(ctx context.Context, opts ...FindApplicationOption) (*Application, error) {
 	// Synchronize access
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -198,6 +236,28 @@ func (d *Device) FrontmostApplication(ctx context.Context) (*Application, error)
 		return nil, errDeviceClosed
 	}
 
+	// Assemble options
+	var options *C.FridaFrontmostQueryOptions
+	var config findApplicationOptions
+
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if config.scope != "" {
+		// Create frontmost application options
+		options = C.frida_frontmost_query_options_new()
+		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
+
+		// Set scope
+		scope, ok := applicationScopeToFrida(config.scope)
+		if !ok {
+			return nil, fmt.Errorf("invalid application scope [scope=%q]", config.scope)
+		}
+
+		C.frida_frontmost_query_options_set_scope(options, scope)
+	}
+
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
 	defer releaseCancellable()
@@ -205,7 +265,7 @@ func (d *Device) FrontmostApplication(ctx context.Context) (*Application, error)
 	// Query frontmost application
 	var gErr *C.GError
 
-	handle := C.frida_device_get_frontmost_application_sync(d.handle, nil, cancellable, &gErr)
+	handle := C.frida_device_get_frontmost_application_sync(d.handle, options, cancellable, &gErr)
 	if err := consumeGError(gErr); err != nil {
 		return nil, fmt.Errorf("get frontmost application: %w", err)
 	}
