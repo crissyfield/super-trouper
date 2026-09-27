@@ -44,6 +44,7 @@ type appListInput struct {
 	Device      string   `json:"device" jsonschema:"handle of the device to list the applications of"`
 	Identifiers []string `json:"identifiers,omitempty" jsonschema:"only return applications with one of these bundle identifiers"`
 	Names       []string `json:"names,omitempty" jsonschema:"only return applications with one of these names"`
+	Scope       string   `json:"scope,omitempty" jsonschema:"application detail level: minimal (default), metadata, or full"`
 }
 
 // appListOutput contains the output of the 'app_list' tool.
@@ -53,6 +54,11 @@ type appListOutput struct {
 
 // appList implements the 'app_list' tool.
 func (s *MCPServer) appList(ctx context.Context, _ *mcp.CallToolRequest, in appListInput) (*mcp.CallToolResult, appListOutput, error) {
+	// Validate scope
+	if (in.Scope != "") && (in.Scope != string(frida.ApplicationScopeMinimal)) && (in.Scope != string(frida.ApplicationScopeMetadata)) && (in.Scope != string(frida.ApplicationScopeFull)) {
+		return nil, appListOutput{}, fmt.Errorf("invalid application scope [scope=%s]", in.Scope)
+	}
+
 	// Synchronize access
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,6 +78,10 @@ func (s *MCPServer) appList(ctx context.Context, _ *mcp.CallToolRequest, in appL
 
 	if len(in.Names) != 0 {
 		options = append(options, frida.WithApplicationNames(in.Names...))
+	}
+
+	if in.Scope != "" {
+		options = append(options, frida.WithApplicationScope(frida.ApplicationScope(in.Scope)))
 	}
 
 	// List applications

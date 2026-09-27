@@ -26,8 +26,9 @@ type ApplicationOption func(*applicationOptions)
 
 // applicationOptions holds the options for a Device.ListApplications call.
 type applicationOptions struct {
-	identifiers []string // Bundle identifiers requested from the device.
-	names       []string // Names that applications must match.
+	identifiers []string         // Bundle identifiers requested from the device.
+	names       []string         // Names that applications must match.
+	scope       ApplicationScope // Detail level requested from the device.
 }
 
 // WithApplicationIdentifiers restricts the enumeration to the application with the given bundle identifier(s).
@@ -40,16 +41,14 @@ func WithApplicationNames(names ...string) ApplicationOption {
 	return func(options *applicationOptions) { options.names = append(options.names, names...) }
 }
 
+// WithApplicationScope sets the detail level returned for applications.
+func WithApplicationScope(scope ApplicationScope) ApplicationOption {
+	return func(options *applicationOptions) { options.scope = scope }
+}
+
 // ListApplications returns the applications installed on the remote device. The result is filtered according to the
 // given options.
 func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption) ([]Application, error) {
-	// Assemble options
-	var config applicationOptions
-
-	for _, opt := range opts {
-		opt(&config)
-	}
-
 	// Synchronize access
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -59,14 +58,16 @@ func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption
 		return nil, errDeviceClosed
 	}
 
-	// Create cancellable
-	cancellable, releaseCancellable := newCancellable(ctx)
-	defer releaseCancellable()
-
-	// Create query options if identifiers were given
+	// Assemble options
 	var options *C.FridaApplicationQueryOptions
+	var config applicationOptions
 
-	if len(config.identifiers) != 0 {
+	for _, opt := range opts {
+		opt(&config)
+	}
+
+	if (len(config.identifiers) != 0) || (config.scope != "") {
+		// Create application options
 		options = C.frida_application_query_options_new()
 		defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
 
@@ -77,7 +78,21 @@ func (d *Device) ListApplications(ctx context.Context, opts ...ApplicationOption
 
 			C.frida_application_query_options_select_identifier(options, identifierCopy)
 		}
+
+		// Set scope
+		if config.scope != "" {
+			scope, ok := applicationScopeToFrida(config.scope)
+			if !ok {
+				return nil, fmt.Errorf("invalid application scope [scope=%q]", config.scope)
+			}
+
+			C.frida_application_query_options_set_scope(options, scope)
+		}
 	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
 
 	// Enumerate applications
 	var gErr *C.GError

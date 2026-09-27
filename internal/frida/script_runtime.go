@@ -21,7 +21,7 @@ const (
 )
 
 // scriptRuntimeToFrida converts a Go ScriptRuntime to a C.FridaScriptRuntime, reporting whether the script
-// runtime is valid. The empty runtime maps to Frida's default runtime.
+// runtime is valid.
 func scriptRuntimeToFrida(runtime ScriptRuntime) (C.FridaScriptRuntime, bool) {
 	switch runtime {
 	case ScriptRuntimeDefault:
