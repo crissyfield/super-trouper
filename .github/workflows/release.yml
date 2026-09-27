@@ -28,7 +28,7 @@ jobs:
 
       - name: Build macOS arm64 archive
         env:
-          FRIDA_VERSION: 17.18.0
+          FRIDA_VERSION: 17.19.0
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -94,7 +94,7 @@ jobs:
       # This directory is mounted read-only into goreleaser-cross as RELEASE_DEPS
       - name: Download Frida Core DevKits
         env:
-          FRIDA_VERSION: 17.18.0
+          FRIDA_VERSION: 17.19.0
           RELEASE_DEPS: ${{ runner.temp }}/super-trouper-release-deps
         run: |
           set -euo pipefail
