@@ -20,7 +20,7 @@ opaque handles.
 ## Features
 
 - **Single Go binary** — no Python, Node, or Frida CLI tooling required on your host
-- **Powered by Frida 17.x** — statically linked against Frida Core DevKit v17.19.0
+- **Powered by Frida 17.x** — statically linked against Frida Core DevKit v17.22.1
 - **Full device support** — list and connect to local, USB, and remote devices, attach to apps and processes
 - **TypeScript and JavaScript instrumentation** — create and load Frida scripts, evaluate directly in a target
 - **Frida CodeShare integration** — search, browse, and fetch the CodeShare catalog of community scripts
