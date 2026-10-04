@@ -37,18 +37,18 @@ var cmdMain = &cobra.Command{
 }
 
 func init() {
-	// Define command line flags.
+	// Define command line flags
 	cmdMain.PersistentFlags().StringP("log-level", "l", "info", "verbosity of logging output")
 	cmdMain.PersistentFlags().BoolP("log-as-json", "j", false, "change logging format to JSON")
 }
 
 // main is the main entry point of the command.
 func main() {
-	// Create a context that is canceled when an interrupt signal is received.
+	// Create a context that is canceled when an interrupt signal is received
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Execute the main command.
+	// Execute the main command
 	if err := cmdMain.ExecuteContext(ctx); err != nil {
 		slog.Error("Unable to execute command", slog.Any("error", err))
 		os.Exit(1)

@@ -8,10 +8,14 @@ import "C"
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -21,35 +25,74 @@ var errPackageManagerClosed = errors.New("package manager already closed")
 
 // PackageManager installs packages using Frida's package manager.
 type PackageManager struct {
-	mu     sync.Mutex             // Guards package manager state.
-	closed bool                   // Whether native resources were released.
-	logger *slog.Logger           // Logger for library events.
-	handle *C.FridaPackageManager // Native Frida package manager.
+	mu        sync.Mutex             // Guards package manager state.
+	projectMu sync.RWMutex           // Guards all package project access.
+	closed    bool                   // Whether native resources were released.
+	logger    *slog.Logger           // Logger for library events.
+	handle    *C.FridaPackageManager // Native Frida package manager.
 }
 
 // Package identifies a package installed by Frida's package manager.
 type Package struct {
 	Name    string // Package name.
-	Version string // Installed package version.
+	Version string // Package version or version constraint.
 }
 
-// InstallOption configures a package installation.
-type InstallOption func(*installOptions)
+// projectOptions holds the options for project functions, like InstallPackages and ListPackages.
+type projectOptions struct {
+	projectRoot string // Project root, empty for the default workspace root.
+}
 
-// installOptions holds the options for a PackageManager.InstallPackages call.
+// ProjectOption allows to apply project options.
+type ProjectOption interface {
+	applyProject(*projectOptions)
+}
+
+// installOptions holds the options for InstallPackages.
 type installOptions struct {
-	projectRoot string   // Project root, empty for Frida's current-directory default.
-	specs       []string // Package specs to install.
+	projectRoot string    // Project root, empty for the default workspace root.
+	packages    []Package // Packages to install.
 }
 
-// WithInstallProjectRoot sets the project directory to install into. Current directory is used if not set.
-func WithInstallProjectRoot(path string) InstallOption {
-	return func(options *installOptions) { options.projectRoot = path }
+// InstallOption allows to apply install options.
+type InstallOption interface {
+	applyInstall(*installOptions)
 }
 
-// WithInstallSpec adds a package spec to install.
-func WithInstallSpec(spec string) InstallOption {
-	return func(options *installOptions) { options.specs = append(options.specs, spec) }
+// ProjectRootOption sets the project root for package operations.
+type ProjectRootOption string
+
+// WithProjectRoot sets the project directory used by a package operation.
+func WithProjectRoot(path string) ProjectRootOption {
+	return ProjectRootOption(path)
+}
+
+// applyProject applies a project root option to a package operation.
+func (o ProjectRootOption) applyProject(options *projectOptions) {
+	options.projectRoot = string(o)
+}
+
+// applyInstall applies a project root option to a package installation.
+func (o ProjectRootOption) applyInstall(options *installOptions) {
+	options.projectRoot = string(o)
+}
+
+// InstallPackageOption identifies a package to install.
+type InstallPackageOption Package
+
+// WithInstallPackageName adds a package by name only to install.
+func WithInstallPackageName(name string) InstallOption {
+	return InstallPackageOption{Name: name}
+}
+
+// WithInstallPackageWithNameAndVersion adds a package with a version to install.
+func WithInstallPackageWithNameAndVersion(name string, version string) InstallOption {
+	return InstallPackageOption{Name: name, Version: version}
+}
+
+// applyInstall adds a package to an installation.
+func (o InstallPackageOption) applyInstall(options *installOptions) {
+	options.packages = append(options.packages, Package(o))
 }
 
 // newPackageManager creates a Frida package manager.
@@ -82,23 +125,73 @@ func (p *PackageManager) close() {
 	p.handle = nil
 }
 
-// InstallPackages installs package specs into a Frida project.
-func (p *PackageManager) InstallPackages(ctx context.Context, opts ...InstallOption) ([]Package, error) {
+// resolvePackageProjectRoot resolves and creates a package project root.
+func resolvePackageProjectRoot(root string) (string, error) {
+	// Use default project root
+	if root == "" {
+		// Resolve cache directory
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve user cache directory: %w", err)
+		}
+
+		root = filepath.Join(cacheDir, "super-trouper", "frida", Version())
+	}
+
+	// Create project root
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create project root [root=%s]: %w", root, err)
+	}
+
+	return root, nil
+}
+
+// InstallPackages installs packages into a Frida project.
+func (p *PackageManager) InstallPackages(ctx context.Context, opts ...InstallOption) error {
 	// Assemble options
 	var config installOptions
 
 	for _, opt := range opts {
-		opt(&config)
+		opt.applyInstall(&config)
 	}
 
-	specs := config.specs
+	// Validate and assemble package specs
+	specs := make([]string, 0, len(config.packages))
+
+	for _, packageSpec := range config.packages {
+		// Validate
+		if strings.TrimSpace(packageSpec.Name) == "" {
+			return errors.New("package name required")
+		}
+
+		if (packageSpec.Version != "") && (strings.TrimSpace(packageSpec.Version) == "") {
+			return errors.New("package version must not be whitespace")
+		}
+
+		// Assemble npm spec
+		spec := packageSpec.Name
+		if packageSpec.Version != "" {
+			spec += "@" + packageSpec.Version
+		}
+
+		// Append
+		specs = append(specs, spec)
+	}
+
+	// Skip empty installs
 	if len(specs) == 0 {
-		return nil, nil
+		return nil
 	}
 
-	if slices.Contains(specs, "") {
-		return nil, errors.New("package spec required")
+	// Resolve project root
+	root, err := resolvePackageProjectRoot(config.projectRoot)
+	if err != nil {
+		return fmt.Errorf("resolve project root: %w", err)
 	}
+
+	// Synchronize project access
+	p.projectMu.Lock()
+	defer p.projectMu.Unlock()
 
 	// Synchronize access
 	p.mu.Lock()
@@ -106,26 +199,24 @@ func (p *PackageManager) InstallPackages(ctx context.Context, opts ...InstallOpt
 
 	// Check if package manager is already closed
 	if p.closed {
-		return nil, errPackageManagerClosed
+		return errPackageManagerClosed
 	}
 
 	// Create installation options
 	options := C.frida_package_install_options_new()
 	if options == nil {
-		return nil, errors.New("create package install options")
+		return errors.New("create package install options")
 	}
 
 	defer C.frida_unref(C.gpointer(unsafe.Pointer(options)))
 
 	C.frida_package_install_options_set_role(options, C.FRIDA_PACKAGE_ROLE_RUNTIME)
 
-	if config.projectRoot != "" {
-		// Set project root
-		cProjectRoot := C.CString(config.projectRoot)
-		defer C.free(unsafe.Pointer(cProjectRoot))
+	// Set project root
+	cProjectRoot := C.CString(root)
+	defer C.free(unsafe.Pointer(cProjectRoot))
 
-		C.frida_package_install_options_set_project_root(options, cProjectRoot)
-	}
+	C.frida_package_install_options_set_project_root(options, cProjectRoot)
 
 	for _, spec := range specs {
 		// Add package spec
@@ -150,37 +241,113 @@ func (p *PackageManager) InstallPackages(ctx context.Context, opts ...InstallOpt
 	)
 
 	if err := consumeGError(gErr); err != nil {
-		return nil, fmt.Errorf("install packages: %w", err)
+		return fmt.Errorf("install packages: %w", err)
 	}
 
 	if result == nil {
-		return nil, errors.New("install packages: empty")
+		return errors.New("install packages: empty")
 	}
 
 	defer C.frida_unref(C.gpointer(unsafe.Pointer(result)))
 
-	// Collect packages changed by this installation.
-	list := C.frida_package_install_result_get_packages(result)
-	if list == nil {
+	return nil
+}
+
+// packageManifest contains the direct runtime dependencies of a package project.
+type packageManifest struct {
+	Dependencies map[string]string `json:"dependencies"`
+}
+
+// packageLockfile contains the resolved package versions recorded by npm.
+type packageLockfile struct {
+	Packages     map[string]packageLockEntry `json:"packages"`
+	Dependencies map[string]packageLockEntry `json:"dependencies"`
+}
+
+// packageLockEntry contains the installed version of a package.
+type packageLockEntry struct {
+	Version string `json:"version"`
+}
+
+// ListPackages lists the direct packages installed in a Frida project.
+func (p *PackageManager) ListPackages(opts ...ProjectOption) ([]Package, error) {
+	// Assemble options
+	var config projectOptions
+
+	for _, opt := range opts {
+		opt.applyProject(&config)
+	}
+
+	// Resolve project root
+	root, err := resolvePackageProjectRoot(config.projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project root: %w", err)
+	}
+
+	// Synchronize project access
+	p.projectMu.RLock()
+	defer p.projectMu.RUnlock()
+
+	// Read package manifest
+	manifestData, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 
-	count := int(C.frida_package_list_size(list))
-	installed := make([]Package, 0, count)
+	if err != nil {
+		return nil, fmt.Errorf("read package manifest [root=%s]: %w", root, err)
+	}
 
-	for i := range count {
-		// Get package from list
-		item := C.frida_package_list_get(list, C.gint(i))
-		if item == nil {
-			continue
+	// Decode package manifest
+	var manifest packageManifest
+
+	err = json.Unmarshal(manifestData, &manifest)
+	if err != nil {
+		return nil, fmt.Errorf("decode package manifest [root=%s]: %w", root, err)
+	}
+
+	// Read package lockfile (if present)
+	var lockfile packageLockfile
+
+	lockData, err := os.ReadFile(filepath.Join(root, "package-lock.json"))
+	if (err != nil) && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read package lockfile [root=%s]: %w", root, err)
+	}
+
+	if err == nil {
+		// Decode package lockfile
+		err := json.Unmarshal(lockData, &lockfile)
+		if err != nil {
+			return nil, fmt.Errorf("decode package lockfile [root=%s]: %w", root, err)
+		}
+	}
+
+	// Collect direct package entries
+	packages := make([]Package, 0, len(manifest.Dependencies))
+
+	for name, spec := range manifest.Dependencies {
+		// Resolve version
+		version := spec
+
+		if entry, ok := lockfile.Packages["node_modules/"+name]; ok && (entry.Version != "") {
+			// Use resolved version from packages
+			version = entry.Version
+		} else if entry, ok := lockfile.Dependencies[name]; ok && (entry.Version != "") {
+			// Use resolved version from dependencies
+			version = entry.Version
 		}
 
-		// Append package to list
-		installed = append(installed, Package{
-			Name:    C.GoString(C.frida_package_get_name(item)),
-			Version: C.GoString(C.frida_package_get_version(item)),
+		// Append
+		packages = append(packages, Package{
+			Name:    name,
+			Version: version,
 		})
 	}
 
-	return installed, nil
+	// Sort packages
+	sort.Slice(packages, func(i int, j int) bool {
+		return packages[i].Name < packages[j].Name
+	})
+
+	return packages, nil
 }
