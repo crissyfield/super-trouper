@@ -20,10 +20,11 @@ var errCompilerClosed = errors.New("compiler already closed")
 
 // Compiler bundles scripts using Frida's compiler.
 type Compiler struct {
-	mu     sync.Mutex       // Guards compiler state.
-	closed bool             // Whether native resources were released.
-	logger *slog.Logger     // Logger for library events.
-	handle *C.FridaCompiler // Native Frida compiler.
+	mu          sync.Mutex       // Guards compiler state.
+	workspaceMu *sync.RWMutex    // Shared workspace lock guarding package project access.
+	closed      bool             // Whether native resources were released.
+	logger      *slog.Logger     // Logger for library events.
+	handle      *C.FridaCompiler // Native Frida compiler.
 }
 
 // CompileOption configures a compiler build.
@@ -40,7 +41,7 @@ func WithCompileProjectRoot(path string) CompileOption {
 }
 
 // newCompiler creates a compiler from the given Frida device manager.
-func newCompiler(manager *C.FridaDeviceManager, logger *slog.Logger) (*Compiler, error) {
+func newCompiler(workspaceMu *sync.RWMutex, manager *C.FridaDeviceManager, logger *slog.Logger) (*Compiler, error) {
 	// Create compiler
 	handle := C.frida_compiler_new(manager)
 	if handle == nil {
@@ -48,7 +49,7 @@ func newCompiler(manager *C.FridaDeviceManager, logger *slog.Logger) (*Compiler,
 	}
 
 	// Return Compiler instance
-	return &Compiler{logger: logger, handle: handle}, nil
+	return &Compiler{workspaceMu: workspaceMu, logger: logger, handle: handle}, nil
 }
 
 // close releases native compiler resources.
@@ -91,6 +92,10 @@ func (c *Compiler) Compile(ctx context.Context, entrypoint string, opts ...Compi
 	if c.closed {
 		return "", errCompilerClosed
 	}
+
+	// Synchronize project access
+	c.workspaceMu.RLock()
+	defer c.workspaceMu.RUnlock()
 
 	// Assemble options
 	options := C.frida_build_options_new()

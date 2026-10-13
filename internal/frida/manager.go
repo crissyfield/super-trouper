@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"unsafe"
 )
@@ -24,13 +26,15 @@ var errManagerClosed = errors.New("manager already closed")
 
 // Manager owns a native Frida device manager and lazily initialized build resources.
 type Manager struct {
-	mu             sync.Mutex            // Guards manager state.
-	closed         bool                  // Whether native resources were released.
-	logger         *slog.Logger          // Logger for library events.
-	manager        *C.FridaDeviceManager // Native Frida device manager.
-	devices        map[*Device]struct{}  // Active devices created by this manager.
-	packageManager *PackageManager       // Lazily initialized Frida package manager.
-	compiler       *Compiler             // Lazily initialized Frida compiler.
+	mu              sync.Mutex            // Guards manager state.
+	closed          bool                  // Whether native resources were released.
+	logger          *slog.Logger          // Logger for library events.
+	manager         *C.FridaDeviceManager // Native Frida device manager.
+	devices         map[*Device]struct{}  // Active devices created by this manager.
+	workspaceMu     sync.RWMutex          // Guards package project access, shared with PackageManager and compilers.
+	packageManager  *PackageManager       // Lazily initialized Frida package manager.
+	compiler        *Compiler             // Lazily initialized Frida compiler.
+	patternCompiler *PatternCompiler      // Lazily initialized Frida Pattern compiler.
 }
 
 // ManagerOption configures a Frida manager.
@@ -109,6 +113,12 @@ func (m *Manager) Close(ctx context.Context) error {
 		m.compiler = nil
 	}
 
+	// Close Pattern compiler if it was created
+	if m.patternCompiler != nil {
+		m.patternCompiler.close()
+		m.patternCompiler = nil
+	}
+
 	// Create cancellable
 	cancellable, releaseCancellable := newCancellable(ctx)
 
@@ -139,6 +149,27 @@ func (m *Manager) releaseDevice(device *Device) {
 	m.mu.Unlock()
 }
 
+// WorkspaceRoot returns the package project root used by package and build operations, defaulting to Super Trouper's shared Frida workspace when empty, and creating it when needed.
+func WorkspaceRoot(projectRoot string) (string, error) {
+	// Use default project root
+	if projectRoot == "" {
+		// Resolve cache directory
+		cacheDir, err := os.UserCacheDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve user cache directory: %w", err)
+		}
+
+		projectRoot = filepath.Join(cacheDir, "super-trouper", "frida", Version())
+	}
+
+	// Create project root
+	if err := os.MkdirAll(projectRoot, 0o700); err != nil {
+		return "", fmt.Errorf("create project root [root=%s]: %w", projectRoot, err)
+	}
+
+	return projectRoot, nil
+}
+
 // PackageManager returns the manager's package manager, creating it on first use.
 func (m *Manager) PackageManager() (*PackageManager, error) {
 	// Synchronize access
@@ -152,7 +183,7 @@ func (m *Manager) PackageManager() (*PackageManager, error) {
 
 	// Create package manager lazily
 	if m.packageManager == nil {
-		packages, err := newPackageManager(m.logger)
+		packages, err := newPackageManager(&m.workspaceMu, m.logger)
 		if err != nil {
 			return nil, fmt.Errorf("create package manager: %w", err)
 		}
@@ -176,7 +207,7 @@ func (m *Manager) Compiler() (*Compiler, error) {
 
 	// Create compiler lazily
 	if m.compiler == nil {
-		compiler, err := newCompiler(m.manager, m.logger)
+		compiler, err := newCompiler(&m.workspaceMu, m.manager, m.logger)
 		if err != nil {
 			return nil, fmt.Errorf("create compiler: %w", err)
 		}
@@ -185,6 +216,30 @@ func (m *Manager) Compiler() (*Compiler, error) {
 	}
 
 	return m.compiler, nil
+}
+
+// PatternCompiler returns the manager's Pattern compiler, creating it on first use.
+func (m *Manager) PatternCompiler() (*PatternCompiler, error) {
+	// Synchronize access
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if manager is already closed
+	if m.closed {
+		return nil, errManagerClosed
+	}
+
+	// Create Pattern compiler lazily
+	if m.patternCompiler == nil {
+		compiler, err := newPatternCompiler(&m.workspaceMu)
+		if err != nil {
+			return nil, fmt.Errorf("create pattern compiler: %w", err)
+		}
+
+		m.patternCompiler = compiler
+	}
+
+	return m.patternCompiler, nil
 }
 
 // EnumerateDevices returns the Frida devices currently detected by the host.
@@ -387,10 +442,6 @@ func (m *Manager) AddRemoteDevice(ctx context.Context, address string, opts ...R
 		return nil, errManagerClosed
 	}
 
-	// Create cancellable
-	cancellable, releaseCancellable := newCancellable(ctx)
-	defer releaseCancellable()
-
 	// Assemble remote device options
 	var options *C.FridaRemoteDeviceOptions
 	var config remoteDeviceOptions
@@ -444,6 +495,10 @@ func (m *Manager) AddRemoteDevice(ctx context.Context, address string, opts ...R
 			C.frida_remote_device_options_set_keepalive_interval(options, C.gint(config.keepaliveInterval))
 		}
 	}
+
+	// Create cancellable
+	cancellable, releaseCancellable := newCancellable(ctx)
+	defer releaseCancellable()
 
 	// Connect to device by address
 	var gErr *C.GError

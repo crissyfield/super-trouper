@@ -55,6 +55,11 @@ func consumeGError(gErr *C.GError) error {
 // valueFromVariant converts a GVariant to the closest Go representation. Unsupported types are returned as
 // their GVariant print representation.
 func valueFromVariant(variant *C.GVariant) any {
+	// Early exit if variant is nil
+	if variant == nil {
+		return nil
+	}
+
 	// Convert based on the GVariant type
 	switch C.GoString(C.g_variant_get_type_string(variant)) {
 	case "s":

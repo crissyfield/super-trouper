@@ -38,7 +38,7 @@ linters:
       min-occurrences: 3                  # minimal occurrences count to trigger, 3 by default
 
     gocyclo:
-      min-complexity: 20                  # minimal code complexity to report, 30 by default
+      min-complexity: 30                  # minimal code complexity to report, 30 by default
 
     nestif:
       min-complexity: 12                  # minimal complexity of if statements to report

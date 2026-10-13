@@ -25,11 +25,11 @@ var errPackageManagerClosed = errors.New("package manager already closed")
 
 // PackageManager installs packages using Frida's package manager.
 type PackageManager struct {
-	mu        sync.Mutex             // Guards package manager state.
-	projectMu sync.RWMutex           // Guards all package project access.
-	closed    bool                   // Whether native resources were released.
-	logger    *slog.Logger           // Logger for library events.
-	handle    *C.FridaPackageManager // Native Frida package manager.
+	mu          sync.Mutex             // Guards package manager state.
+	workspaceMu *sync.RWMutex          // Shared workspace lock guarding package project access.
+	closed      bool                   // Whether native resources were released.
+	logger      *slog.Logger           // Logger for library events.
+	handle      *C.FridaPackageManager // Native Frida package manager.
 }
 
 // Package identifies a package installed by Frida's package manager.
@@ -96,7 +96,7 @@ func (o InstallPackageOption) applyInstall(options *installOptions) {
 }
 
 // newPackageManager creates a Frida package manager.
-func newPackageManager(logger *slog.Logger) (*PackageManager, error) {
+func newPackageManager(workspaceMu *sync.RWMutex, logger *slog.Logger) (*PackageManager, error) {
 	// Create package manager
 	handle := C.frida_package_manager_new()
 	if handle == nil {
@@ -104,7 +104,7 @@ func newPackageManager(logger *slog.Logger) (*PackageManager, error) {
 	}
 
 	// Return PackageManager instance
-	return &PackageManager{logger: logger, handle: handle}, nil
+	return &PackageManager{workspaceMu: workspaceMu, logger: logger, handle: handle}, nil
 }
 
 // close releases native package manager resources.
@@ -123,27 +123,6 @@ func (p *PackageManager) close() {
 	// Clean up
 	C.frida_unref(C.gpointer(unsafe.Pointer(p.handle)))
 	p.handle = nil
-}
-
-// resolvePackageProjectRoot resolves and creates a package project root.
-func resolvePackageProjectRoot(root string) (string, error) {
-	// Use default project root
-	if root == "" {
-		// Resolve cache directory
-		cacheDir, err := os.UserCacheDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve user cache directory: %w", err)
-		}
-
-		root = filepath.Join(cacheDir, "super-trouper", "frida", Version())
-	}
-
-	// Create project root
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", fmt.Errorf("create project root [root=%s]: %w", root, err)
-	}
-
-	return root, nil
 }
 
 // InstallPackages installs packages into a Frida project.
@@ -184,14 +163,14 @@ func (p *PackageManager) InstallPackages(ctx context.Context, opts ...InstallOpt
 	}
 
 	// Resolve project root
-	root, err := resolvePackageProjectRoot(config.projectRoot)
+	root, err := WorkspaceRoot(config.projectRoot)
 	if err != nil {
 		return fmt.Errorf("resolve project root: %w", err)
 	}
 
 	// Synchronize project access
-	p.projectMu.Lock()
-	defer p.projectMu.Unlock()
+	p.workspaceMu.Lock()
+	defer p.workspaceMu.Unlock()
 
 	// Synchronize access
 	p.mu.Lock()
@@ -279,14 +258,14 @@ func (p *PackageManager) ListPackages(opts ...ProjectOption) ([]Package, error) 
 	}
 
 	// Resolve project root
-	root, err := resolvePackageProjectRoot(config.projectRoot)
+	root, err := WorkspaceRoot(config.projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("resolve project root: %w", err)
 	}
 
 	// Synchronize project access
-	p.projectMu.RLock()
-	defer p.projectMu.RUnlock()
+	p.workspaceMu.RLock()
+	defer p.workspaceMu.RUnlock()
 
 	// Read package manifest
 	manifestData, err := os.ReadFile(filepath.Join(root, "package.json"))

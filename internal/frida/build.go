@@ -37,7 +37,7 @@ func (m *Manager) BuildScript(ctx context.Context, source string, packages []Pac
 	}
 
 	// Resolve workspace folder
-	root, err := resolvePackageProjectRoot(config.projectRoot)
+	root, err := WorkspaceRoot(config.projectRoot)
 	if err != nil {
 		return "", fmt.Errorf("resolve project root: %w", err)
 	}
@@ -126,10 +126,6 @@ func (m *Manager) BuildScript(ctx context.Context, source string, packages []Pac
 	if err != nil {
 		return "", fmt.Errorf("get compiler: %w", err)
 	}
-
-	// Synchronize project access
-	pm.projectMu.RLock()
-	defer pm.projectMu.RUnlock()
 
 	// Compile bundle
 	bundle, err := compiler.Compile(
