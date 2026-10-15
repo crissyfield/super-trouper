@@ -60,6 +60,12 @@ func (s *MCPServer) sessionEvaluator(ctx context.Context, handle string) (*frida
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	return s.sessionEvaluatorLocked(ctx, handle)
+}
+
+// sessionEvaluatorLocked returns the persistent evaluator of the specified session, creating it on first use.
+// The caller must hold the mutex.
+func (s *MCPServer) sessionEvaluatorLocked(ctx context.Context, handle string) (*frida.Evaluator, error) {
 	// Look up session
 	state, err := s.lookupSessionState(handle)
 	if err != nil {

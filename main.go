@@ -131,7 +131,10 @@ func runMCP(command *cobra.Command, _ []string) error {
 	codeshare := codeshare.New()
 
 	// Create MCP server
-	server := mcpserver.New(manager, codeshare, command.Version)
+	server, err := mcpserver.New(manager, codeshare, command.Version)
+	if err != nil {
+		return fmt.Errorf("create MCP server: %w", err)
+	}
 
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
