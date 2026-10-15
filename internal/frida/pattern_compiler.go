@@ -2,10 +2,19 @@ package frida
 
 /*
 #include <stdlib.h>
+#include <string.h>
 #include <frida-core.h>
 
+// g_str_equal cannot be referenced as a callback: since the Frida Core DevKit 17.23.3, its Linux headers rename
+// GLib symbols with a '_frida_' prefix, yet '#undef g_str_equal' before defining the string comparison macro,
+// so the bare name no longer resolves to the renamed function. A local comparator keeps this independent of the
+// devkit.
+static gboolean pattern_defines_equal(gconstpointer a, gconstpointer b) {
+  return strcmp((const gchar *) a, (const gchar *) b) == 0;
+}
+
 static GHashTable * pattern_defines_new(void) {
-  return g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+  return g_hash_table_new_full(g_str_hash, pattern_defines_equal, g_free, g_free);
 }
 
 static void pattern_defines_insert(GHashTable * defines, gchar * name, gchar * value) {
