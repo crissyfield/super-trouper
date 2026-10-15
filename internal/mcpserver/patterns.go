@@ -360,8 +360,9 @@ func (s *MCPServer) patternRead(_ context.Context, _ *mcp.CallToolRequest, in pa
 
 // patternDescribeInput contains the input arguments of the 'pattern_describe' tool.
 type patternDescribeInput struct {
-	Pattern string `json:"pattern" jsonschema:"handle of the Pattern project"`
-	Session string `json:"session" jsonschema:"handle of the session whose ABI to compile for"`
+	Pattern string            `json:"pattern" jsonschema:"handle of the Pattern project"`
+	Session string            `json:"session" jsonschema:"handle of the session whose ABI to compile for"`
+	Defines map[string]string `json:"defines,omitempty" jsonschema:"preprocessor macros to define, as by a #define at the top of the entrypoint"`
 }
 
 // patternDescribeOutput contains the output of the 'pattern_describe' tool.
@@ -393,7 +394,7 @@ func (s *MCPServer) patternDescribe(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 
 	// Compile project for target ABI
-	module, target, err := s.patternModule(ctx, evaluator, state)
+	module, target, err := s.patternModule(ctx, evaluator, state, in.Defines)
 	if err != nil {
 		return nil, nil, fmt.Errorf("compile Pattern project: %w", err)
 	}
@@ -443,6 +444,7 @@ type patternDecodeInput struct {
 	Count    uint                       `json:"count,omitempty" jsonschema:"snapshot size in bytes (1-1048576, default 4096)"`
 	Type     string                     `json:"type,omitempty" jsonschema:"declared Pattern type to decode, defaulting to the root type"`
 	Inputs   map[string]json.RawMessage `json:"inputs,omitempty" jsonschema:"values for Pattern in variables"`
+	Defines  map[string]string          `json:"defines,omitempty" jsonschema:"preprocessor macros to define, as by a #define at the top of the entrypoint"`
 	MaxNodes uint                       `json:"max_nodes,omitempty" jsonschema:"maximum number of value nodes to decode, defaulting to 4096"`
 }
 
@@ -489,7 +491,7 @@ func (s *MCPServer) patternDecode(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 
 	// Compile project for target ABI
-	module, target, err := s.patternModule(ctx, evaluator, state)
+	module, target, err := s.patternModule(ctx, evaluator, state, in.Defines)
 	if err != nil {
 		return nil, nil, fmt.Errorf("compile Pattern project: %w", err)
 	}
@@ -562,7 +564,14 @@ type patternTarget struct {
 
 // patternModule returns the lazily compiled module for the ABI of the session behind the given evaluator. The
 // caller must hold the mutex and must keep holding it while the returned module is in use.
-func (s *MCPServer) patternModule(ctx context.Context, evaluator *frida.Evaluator, state *patternState) (*frida.PatternModule, patternTarget, error) {
+func (s *MCPServer) patternModule(ctx context.Context, evaluator *frida.Evaluator, state *patternState, defines map[string]string) (*frida.PatternModule, patternTarget, error) {
+	// Validate defines
+	for name := range defines {
+		if name == "" {
+			return nil, patternTarget{}, errors.New("pattern define names must not be empty")
+		}
+	}
+
 	// Determine the target ABI
 	target, err := evaluator.Evaluate[patternTarget](
 		ctx,
@@ -579,8 +588,16 @@ func (s *MCPServer) patternModule(ctx context.Context, evaluator *frida.Evaluato
 		return nil, patternTarget{}, errors.New("get Pattern target ABI: empty platform or architecture")
 	}
 
+	// Sort defines to produce a stable cache key
+	names := slices.Sorted(maps.Keys(defines))
+	pairs := make([]string, 0, len(names))
+
+	for _, name := range names {
+		pairs = append(pairs, name+"="+defines[name])
+	}
+
 	// Return cached module
-	key := target.Platform + ":" + target.Arch
+	key := target.Platform + ":" + target.Arch + ":" + strings.Join(pairs, ";")
 
 	if module, ok := state.modules[key]; ok {
 		return module, target, nil
@@ -599,6 +616,7 @@ func (s *MCPServer) patternModule(ctx context.Context, evaluator *frida.Evaluato
 		frida.WithPatternCompileProjectRoot(s.workspace),
 		frida.WithPatternCompilePlatform(target.Platform),
 		frida.WithPatternCompileArch(target.Arch),
+		frida.WithPatternCompileDefines(defines),
 	)
 
 	if err != nil {

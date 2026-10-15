@@ -3,6 +3,14 @@ package frida
 /*
 #include <stdlib.h>
 #include <frida-core.h>
+
+static GHashTable * pattern_defines_new(void) {
+  return g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+}
+
+static void pattern_defines_insert(GHashTable * defines, gchar * name, gchar * value) {
+  g_hash_table_insert(defines, name, value);
+}
 */
 import "C"
 
@@ -60,9 +68,10 @@ type PatternCompileOption func(*patternCompileOptions)
 
 // patternCompileOptions holds the options for a PatternCompiler.Compile call.
 type patternCompileOptions struct {
-	projectRoot string // Project root used to resolve imports, empty for Frida's inferred default.
-	platform    string // Target Process.platform value, empty to omit.
-	arch        string // Target Process.arch value, empty to omit.
+	projectRoot string            // Project root used to resolve imports, empty for Frida's inferred default.
+	platform    string            // Target Process.platform value, empty to omit.
+	arch        string            // Target Process.arch value, empty to omit.
+	defines     map[string]string // Preprocessor macros to define, nil to omit.
 }
 
 // WithPatternCompileProjectRoot sets the project root used to resolve imports.
@@ -78,6 +87,11 @@ func WithPatternCompilePlatform(platform string) PatternCompileOption {
 // WithPatternCompileArch sets the target Process.arch value.
 func WithPatternCompileArch(arch string) PatternCompileOption {
 	return func(options *patternCompileOptions) { options.arch = arch }
+}
+
+// WithPatternCompileDefines defines preprocessor macros, like '#define' at the top of the entrypoint.
+func WithPatternCompileDefines(defines map[string]string) PatternCompileOption {
+	return func(options *patternCompileOptions) { options.defines = defines }
 }
 
 // Compile compiles a Pattern entrypoint for a target platform and architecture.
@@ -108,7 +122,7 @@ func (c *PatternCompiler) Compile(ctx context.Context, entrypoint string, opts .
 		opt(&config)
 	}
 
-	if (config.projectRoot != "") || (config.platform != "") || (config.arch != "") {
+	if (config.projectRoot != "") || (config.platform != "") || (config.arch != "") || (len(config.defines) > 0) {
 		// Create compile options
 		options = C.frida_pattern_compile_options_new()
 		if options == nil {
@@ -139,6 +153,24 @@ func (c *PatternCompiler) Compile(ctx context.Context, entrypoint string, opts .
 			defer C.free(unsafe.Pointer(cArch))
 
 			C.frida_pattern_compile_options_set_arch(options, cArch)
+		}
+
+		// Set defines
+		if len(config.defines) > 0 {
+			// Create defines table, taking ownership of the inserted strings
+			cDefines := C.pattern_defines_new()
+			if cDefines == nil {
+				return nil, errors.New("create pattern defines")
+			}
+
+			defer C.g_hash_table_unref(cDefines)
+
+			// Populate defines table
+			for name, value := range config.defines {
+				C.pattern_defines_insert(cDefines, C.CString(name), C.CString(value))
+			}
+
+			C.frida_pattern_compile_options_set_defines(options, cDefines)
 		}
 	}
 
