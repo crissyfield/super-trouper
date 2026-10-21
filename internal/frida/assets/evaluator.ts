@@ -48,16 +48,16 @@ function receiveMemoryRead() {
 
 // Writes the request's binary payload at the given address and reports the number of bytes written.
 function receiveMemoryWrite() {
-  recv('memory_write', function(message) {
+  recv('memory_write', function(message, data) {
     const { id, address } = message.payload;
 
     try {
       // Write memory and report number of bytes written
-      if (!message.data) {
+      if (!data) {
         throw new Error('missing binary payload');
       }
 
-      const bytes = new Uint8Array(message.data);
+      const bytes = new Uint8Array(data);
       ptr(address).writeByteArray(bytes);
 
       send({ id, result: bytes.length });
