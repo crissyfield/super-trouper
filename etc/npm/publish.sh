@@ -20,6 +20,21 @@ if (( $# == 3 )); then
   dry_run=true
 fi
 
+# Wait until a package version is visible on the registry (up to five minutes)
+wait_for_visibility() {
+  local package_name="$1" version="$2" attempt
+
+  for attempt in {1..60}; do
+    if npm view "${package_name}@${version}" version >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 5
+  done
+
+  printf '%s@%s did not become visible on the registry\n' "${package_name}" "${version}" >&2
+  return 1
+}
+
 # Set up directories
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -114,11 +129,11 @@ EOF
   # Validate
   node \
     --input-type=module \
-	-e '
-	  import { readFileSync } from "node:fs";
-	  JSON.parse(readFileSync(process.argv[1], "utf8"));
-	' \
-	"${package_dir}/package.json"
+    -e '
+      import { readFileSync } from "node:fs";
+      JSON.parse(readFileSync(process.argv[1], "utf8"));
+    ' \
+    "${package_dir}/package.json"
 done
 
 # Assemble launcher package
@@ -138,9 +153,9 @@ node \
   --input-type=module \
   -e '
     import { readFileSync } from "node:fs";
-	const pkg = JSON.parse(readFileSync(process.argv[1], "utf8"));
-	if (pkg.version !== process.argv[2]) {
-	  throw new Error("version substitution failed")
+    const pkg = JSON.parse(readFileSync(process.argv[1], "utf8"));
+    if (pkg.version !== process.argv[2]) {
+      throw new Error("version substitution failed")
     }
   ' \
   "${launcher_dir}/package.json" \
@@ -168,8 +183,8 @@ for platform in "${platforms[@]}"; do
   fi
 
   (
-	cd "${staging_dir}/${npm_suffix}" && \
-	npm publish "${publish_args[@]}"
+    cd "${staging_dir}/${npm_suffix}" && \
+    npm publish "${publish_args[@]}"
   )
 done
 
@@ -179,22 +194,8 @@ if [[ "${dry_run}" == false ]]; then
   for platform in "${platforms[@]}"; do
     IFS='|' read -r npm_suffix _ <<< "${platform}"
     package_name="@crissyfield/super-trouper-${npm_suffix}"
-    
-	# Check for up to five minutes
-	visible=false
-    for _ in {1..60}; do
-      if npm view "${package_name}@${version}" version >/dev/null 2>&1; then
-        visible=true
-        break
-      fi
-      sleep 5
-    done
 
-	# If not visible after five minutes, exit
-    if [[ "${visible}" == false ]]; then
-      printf '%s@%s did not become visible on the registry\n' "${package_name}" "${version}" >&2
-      exit 1
-    fi
+    wait_for_visibility "${package_name}" "${version}"
   done
 fi
 
@@ -203,4 +204,8 @@ if [[ "${dry_run}" == false ]] && npm view "@crissyfield/super-trouper@${version
   printf 'skipping @crissyfield/super-trouper@%s, already on the registry\n' "${version}"
 else
   (cd "${launcher_dir}" && npm publish "${publish_args[@]}")
+
+  if [[ "${dry_run}" == false ]]; then
+    wait_for_visibility "@crissyfield/super-trouper" "${version}"
+  fi
 fi
