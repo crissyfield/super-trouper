@@ -1,29 +1,42 @@
 # AGENTS.md
 
-## Commands
+## Build and verification
 
-- The project links `frida-core` via CGO, so Go tooling requires a Frida Core devkit matching the build host. If it is not installed in a standard location, set `CGO_ENABLED=1`, `CGO_CFLAGS="-I/path/to/frida-core-devkit/include"`, and `CGO_LDFLAGS="-L/path/to/frida-core-devkit/lib"`.
-- Use `go vet ./...`, `go build ./...`, `go install .`, and `go run .` directly; the CGO environment must be set for each command when the devkit is in a non-standard location.
-- Format changed Go files with `gofmt -w <files>`.
-- `go vet ./...` is the fast verification; `golangci-lint run ./...` is the full lint check (`.golangci.yml` v2).
-- NEVER add test files to this project.
-- On a SIP-enabled macOS host without root, process injection fails with a frida-core timeout ("Timeout was reached"), so end-to-end testing of the MCP `session_attach` tool and evaluator needs privileges; device listing, application/process listing, spawning, and killing work without them.
-- Typical post-edit flow: `gofmt -w <files>`, then `go vet ./...` (or `golangci-lint run ./...` for full lint), then `go build ./...`.
+- Use Go 1.27.0 as specified in `go.mod` and CI; `Evaluator.Evaluate[T]` uses generic methods. Go tooling also needs CGO and a host-compatible Frida Core DevKit; releases currently use 17.23.3.
+- For an `include/` + `lib/` devkit layout, export the following before running Go or lint commands (the local `etc/frida-core-devkit/` is untracked; do not assume it exists):
 
-## Structure
+  ```sh
+  export CGO_ENABLED=1
+  export CGO_CFLAGS="-I/path/to/frida-core-devkit/include"
+  export CGO_LDFLAGS="-L/path/to/frida-core-devkit/lib"
+  ```
 
-- `main.go` defines `cmdMain`, configures Viper and slog, creates a Frida manager, builds an `mcpserver.MCPServer` via `mcpserver.New`, and runs it over stdio until the command context is cancelled. It treats `context.Canceled` as a clean shutdown, closes resources with 10-second timeout contexts, and owns signal-aware execution and final error logging/exiting. Do not call `os.Exit` outside `main`.
-- `internal/mcpserver/` implements the MCP server with `github.com/modelcontextprotocol/go-sdk/mcp`. `MCPServer` (in `server.go`) holds the `*mcp.Server`, the injected `*frida.Manager`, and mutex-guarded state maps; `New(manager, version)` registers all tools, `Run(ctx)` runs the stdio transport, and `Close(ctx)` closes all scripts, sessions, and devices created through tools. Tool handlers are methods grouped by domain in `devices.go`, `applications.go`, `processes.go`, `sessions.go`, and `scripts.go`. Devices, sessions, and scripts are referenced by opaque UUID handles; handlers synchronize state map access with `mu`.
-- `internal/frida/` is a CGO wrapper over frida-core exposing `Manager`, `Device`, `Session`, `Evaluator`, `Script`, `Process`, and `Application`. It embeds the evaluator script from `assets/evaluator.js`, provides GIO-cancellable helpers in `tools.go`, and performs refcounted library init in `library.go`.
+- Raw Frida release archives put `frida-core.h` and `libfrida-core.a` at their root; point both flags there unless you rearrange them as CI does.
+- Post-edit flow: `gofmt -w <changed Go files>`, then `go vet ./...`, then `go build ./...`. Full lint: `golangci-lint run ./...` (v2 config). Run/install with `go run .` / `go install .` using the same CGO environment.
+- NEVER add test files to this project. On SIP-enabled macOS without root, injection can time out with "Timeout was reached"; `session_attach` and evaluator end-to-end checks need privileges. Device/application/process listing, spawning, and killing work without them.
+
+## Architecture and lifecycle
+
+- `main.go` wires the Frida manager and CodeShare client into `mcpserver.New(manager, codeShare, version)`, which returns a server and an error (startup loads persisted Pattern projects). Register new tool groups in `internal/mcpserver/server.go:New` and document tools in `README.md`.
+- Stdout is exclusively MCP stdio transport; send logs through `slog` to stderr. `main` owns signal handling and process exit; `context.Canceled` is a clean shutdown. Cleanup uses fresh 10-second contexts and closes the MCP server before the Frida manager.
+- MCP devices, sessions, scripts, and Pattern projects use opaque handles. `MCPServer.mu` guards state maps; helpers suffixed `Locked` require the caller to hold it. `patternModule` requires keeping that lock for the entire use of the returned native module.
+- `Manager.Close` does not close active devices. Release scripts/evaluators before sessions and sessions before devices; close cached Pattern modules before the manager. CGO helpers `newCancellable` and `consumeGError` live in `internal/frida/utils.go`; library init/deinit is manager-refcounted in `library.go`.
+- The persistent per-session evaluator is embedded from `internal/frida/assets/evaluator.ts` and bundled through `Manager.BuildScript`; update Go and TypeScript message formats together. Compilation and npm installation use Frida's native APIs, not a host Node/npm toolchain.
+- Packages, temporary script builds, and persisted `patterns/<handle>/` projects share `os.UserCacheDir()/super-trouper/frida/<Frida version>/`. Use `WorkspaceRoot`, not a hard-coded `~/.cache` path (macOS differs). Package writes and compiler reads coordinate through `Manager.workspaceMu`.
+- Pattern compilation uses the shared workspace as project root for package imports and the target's `Process.platform`/`Process.arch` for ABI layout. Modules are cached by target ABI and preprocessor defines. `pattern_describe`/`pattern_decode` intentionally return `any`: current `jsonschema-go` cannot generate schemas for their recursive output types.
 
 ## Configuration
 
-- Viper reads CLI flags, `SUPER_TROUPER_` environment variables, then config files named `config` (for example, `config.yaml`) in `/etc/super-trouper`, `~/.config/super-trouper`, and the working directory. Dots and hyphens become underscores, for example `SUPER_TROUPER_LOGGING_LEVEL`.
-- Logging flags are `logging.level` and `logging.json`.
-- `cmdMain` adds no MCP-specific flags. Devices are connected dynamically through the `device_connect` tool (by device ID, remote address, or type), and tools referencing devices, sessions, or scripts take opaque handles.
+- Logging flags/config keys are `log-level` (`-l`) and `log-as-json` (`-j`); environment equivalents are `SUPER_TROUPER_LOG_LEVEL` and `SUPER_TROUPER_LOG_AS_JSON`. Explicit flags override environment, then config. Viper searches for `config` in `/etc/super-trouper`, `~/.config/super-trouper`, then the working directory; it reads the first matching file.
+- Device selection is through `device_connect`, not startup flags.
+
+## Release packaging
+
+- `.github/workflows/release.yml` runs on `v*` tags. macOS arm64 must build natively with Apple's linker; `.goreleaser.yaml` handles the remaining targets in a cross-compilation container. A plain `GOOS`/`GOARCH` change is insufficient for CGO cross-builds.
+- Update both `FRIDA_VERSION` entries in the release workflow and the README when changing DevKit versions. `etc/npm/` is a binary launcher/publishing layer, not an application workspace; placeholder package versions are filled during publishing. Packaging dry-run: `bash etc/npm/publish.sh VERSION ASSETS_DIRECTORY --dry-run` (Bash 4+; requires release archives and `checksums.txt`).
 
 ## Conventions
 
-- Use `log/slog` for user-facing output and wrap returned errors with `%w`.
+- Wrap returned errors with `%w`; `.golangci.yml` enables `errorlint` and `revive`'s deep-exit rule.
 - Project-owned prose and identifier segments use uppercase initialisms: `URL`, `HTTP`, `JSON`, `MCP`, `API`, and `CLI`. Keep required lowercase external names and config keys unchanged, such as `net/url` and `logging.json`.
 - Enclose every comparison operand in an `if` condition joined by `&&` or `||` in parentheses. Do not parenthesize boolean predicates or negated boolean predicates that do not use `==` or `!=`.
