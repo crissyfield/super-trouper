@@ -1,5 +1,10 @@
 <p align="center">
   <img src="https://crissyfield.github.io/assets/super-trouper-logo.png" width="320" alt="super-trouper logo">
+  <br>
+  <a href="https://github.com/crissyfield/super-trouper/actions/workflows/release.yml"><img src="https://img.shields.io/github/actions/workflow/status/crissyfield/super-trouper/release.yml" alt="Build status"></a>
+  <a href="https://www.npmjs.com/package/@crissyfield/super-trouper"><img src="https://img.shields.io/npm/v/@crissyfield/super-trouper" alt="npm version"></a>
+  <a href="https://pkg.go.dev/github.com/crissyfield/super-trouper"><img src="https://pkg.go.dev/badge/github.com/crissyfield/super-trouper.svg" alt="Go Reference"></a>
+  <a href="https://mcprush.com/to/super-trouper-mcp?ref=badge"><img src="https://mcprush.com/badge/super-trouper-mcp/score.svg" alt="MCP Rush score"></a>
 </p>
 
 
